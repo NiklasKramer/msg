@@ -3,10 +3,12 @@ Engine_StereoGlut : CroneEngine {
 	classvar nvoices = 7;
 
 	var pg;
-	var effect;
+	var reverb;
 	var <buffers;
 	var <voices;
-	var mixBus;
+	var reverbBus;
+	var saturation;
+	var saturationBus;
 	var <phases;
 	var <levels;
 
@@ -54,6 +56,16 @@ Engine_StereoGlut : CroneEngine {
 	}
 
 	alloc {
+		~tf =  Env([-0.7, 0, 0.7], [1,1], [8,-8]).asSignal(1025);
+		~tf = ~tf + (
+			Signal.sineFill(
+				1025,
+				(0!3) ++ [0,0,1,1,0,1].scramble,
+				{rrand(0,2pi)}!9
+			)/10;
+		);
+		~tf = ~tf.normalize;
+		~tfBuf = Buffer.loadCollection(context.server, ~tf.asWavetableNoWrap);
 		buffers = Array.fill(nvoices, { arg i;
 			[Buffer.alloc(
 				context.server,
@@ -62,7 +74,7 @@ Engine_StereoGlut : CroneEngine {
 		});
 
 		SynthDef(\synth, {
-			arg out=0, phase_out=0, level_out=0, buf1, buf2,
+			arg out=0, phase_out=0, level_out=0, saturation_out=0, saturation_level=0, reverb_out=0, reverb_level=0, buf1, buf2,
 			gate=0, pos=0, speed=1, jitter=0,
 			size=0.1, density=20, pitch=1, spread=0, gain=1, envscale=1,
 			freeze=0, t_reset_pos=0, filterControl=0.5; // Added filterControl parameter
@@ -96,13 +108,85 @@ Engine_StereoGlut : CroneEngine {
 			]);
 
 			Out.ar(out, filtered * level * gain);
+			Out.ar(saturation_out, filtered * level * saturation_level);
+			Out.ar(reverb_out, filtered * level * reverb_level);
 			Out.kr(phase_out, pos_sig);
 			// Ignore gain for level out to maintain original logic
 			Out.kr(level_out, level);
 		}).add;
 
+		SynthDef(\saturator, { |in=0, out=0, srate=48000, sdepth=32, crossover=1400, distAmount=15, lowbias=0.04, highbias=0.12, hissAmount=0.0, cutoff=11500, outVolume=1|
+			var input = In.ar(in, 2);  // Read 2 channels from the input
+			var crossAmount = 50;
 
-		SynthDef(\effect, {
+			// Process each channel independently
+			var processChannel = { |channel|
+				var decimated = Decimator.ar(channel, srate, sdepth);
+				
+				var lpf = LPF.ar(
+					decimated, 
+					crossover + crossAmount, 
+					1 
+				) * lowbias;
+
+				var hpf = HPF.ar(
+					decimated,
+					crossover - crossAmount,
+					1
+				) * highbias;
+
+				var beforeHiss = Mix.new([
+					Mix.new([lpf, hpf]),
+					HPF.ar(Mix.new([PinkNoise.ar(0.001), Dust.ar(5, 0.002)]), 2000, hissAmount)
+				]);
+
+				var compressed = Compander.ar(beforeHiss, decimated,
+					thresh: 0.2,
+					slopeBelow: 1,
+					slopeAbove: 0.3,
+					clampTime: 0.001,
+					relaxTime: 0.1
+				);
+				var shaped = Shaper.ar(~tfBuf, compressed * distAmount);
+
+				var afterHiss = HPF.ar(Mix.new([PinkNoise.ar(1), Dust.ar(5, 1)]), 2000, 1);
+
+				var duckedHiss = Compander.ar(afterHiss, decimated,
+					thresh: 0.4,
+					slopeBelow: 1,
+					slopeAbove: 0.2,
+					clampTime: 0.01,
+					relaxTime: 0.1
+				) * 0.5 * hissAmount;
+
+				var morehiss = Mix.new([
+					duckedHiss, 
+					Mix.new([lpf * (1 / lowbias) * (distAmount / 10), shaped])
+				]);
+
+				var limited = Limiter.ar(Mix.new([
+					decimated * 0.5,
+					morehiss
+				]), 0.9, 0.01);
+
+				MoogFF.ar(
+					limited,
+					cutoff,
+					1
+				)
+			};
+
+			// Apply processing to both channels
+			var processed = input.collect(processChannel);
+
+			// set the output volume
+			processed = processed * outVolume;
+			// Output the processed signal
+			Out.ar(out, processed * outVolume);
+		}).add;
+
+
+		SynthDef(\reverb, {
 			arg in, out, mix=0.5, room=0.5, damp=0.5;
 			var sig = In.ar(in, 2);
 			sig = FreeVerb.ar(sig, mix, room, damp);
@@ -112,9 +196,17 @@ Engine_StereoGlut : CroneEngine {
 		context.server.sync;
 
 		// mix bus for all synth outputs
-		mixBus =  Bus.audio(context.server, 2);
+		reverbBus =  Bus.audio(context.server, 2);
+		saturationBus = Bus.audio(context.server, 2);
 
-		effect = Synth.new(\effect, [\in, mixBus.index, \out, context.out_b.index], target: context.xg);
+		// Allocate and initialize buses
+        reverbBus = Bus.audio(context.server, 2); // Mix bus for all synth outputs
+        saturationBus = Bus.audio(context.server, 2); // Saturation bus
+
+        // Initialize reverb and saturation synths
+        reverb = Synth.new(\reverb, [\in, reverbBus, \out, context.out_b.index], target: context.xg);
+        saturation = Synth.new(\saturator, [\in, saturationBus, \out, context.out_b.index], target: context.xg);
+
 
 		phases = Array.fill(nvoices, { arg i; Bus.control(context.server); });
 		levels = Array.fill(nvoices, { arg i; Bus.control(context.server); });
@@ -123,9 +215,13 @@ Engine_StereoGlut : CroneEngine {
 
 		voices = Array.fill(nvoices, { arg i;
 			Synth.new(\synth, [
-				\out, mixBus.index,
+				\out, context.out_b.index,
 				\phase_out, phases[i].index,
 				\level_out, levels[i].index,
+				
+				\saturation_out, saturationBus.index,
+				\reverb_out, reverbBus.index,
+
 				\buf1, buffers[i][0],
 				\buf2, buffers[i][0]
 			], target: pg);
@@ -133,10 +229,21 @@ Engine_StereoGlut : CroneEngine {
 
 		context.server.sync;
 
-		this.addCommand("reverb_mix", "f", { arg msg; effect.set(\mix, msg[1]); });
-		this.addCommand("reverb_room", "f", { arg msg; effect.set(\room, msg[1]); });
-		this.addCommand("reverb_damp", "f", { arg msg; effect.set(\damp, msg[1]); });
+		this.addCommand("reverb_mix", "f", { arg msg; reverb.set(\mix, msg[1]); });
+		this.addCommand("reverb_room", "f", { arg msg; reverb.set(\room, msg[1]); });
+		this.addCommand("reverb_damp", "f", { arg msg; reverb.set(\damp, msg[1]); });
 
+		this.addCommand("saturation_depth", "f", { arg msg; saturation.set(\sdepth, msg[1]); });
+		this.addCommand("saturation_rate", "f", { arg msg; saturation.set(\srate, msg[1]); });
+		this.addCommand("saturation_crossover", "f", { arg msg; saturation.set(\crossover, msg[1]); });
+
+		this.addCommand("saturation_dist", "f", { arg msg; saturation.set(\distAmount, msg[1]); });
+		this.addCommand("saturation_lowbias", "f", { arg msg; saturation.set(\lowbias, msg[1]); });
+		this.addCommand("saturation_highbias", "f", { arg msg; saturation.set(\highbias, msg[1]); });
+		this.addCommand("saturation_hiss", "f", { arg msg; saturation.set(\hissAmount, msg[1]); });
+		this.addCommand("saturation_cutoff", "f", { arg msg; saturation.set(\cutoff, msg[1]); });
+		this.addCommand("saturation_volume", "f", { arg msg; saturation.set(\outVolume, msg[1]); });
+		
 		this.addCommand("read", "is", { arg msg;
 			this.readBuf(msg[1] - 1, msg[2]);
 		});
@@ -234,6 +341,17 @@ Engine_StereoGlut : CroneEngine {
 			voices[voice].set(\envscale, msg[2]);
 		});
 
+		this.addCommand("saturation", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\saturation_level, msg[2]);
+		});
+
+		this.addCommand("reverb", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\reverb_level, msg[2]);
+		});
+
+	
 		nvoices.do({ arg i;
 			this.addPoll(("phase_" ++ (i+1)).asSymbol, {
 				var val = phases[i].getSynchronous;
@@ -256,7 +374,8 @@ Engine_StereoGlut : CroneEngine {
 		phases.do({ arg bus; bus.free; });
 		levels.do({ arg bus; bus.free; });
 		buffers.do({ arg b; b.do(_.free); });
-		effect.free;
-		mixBus.free;
+		reverb.free;
+		reverbBus.free;
+		saturationBus.free;
 	}
 }
