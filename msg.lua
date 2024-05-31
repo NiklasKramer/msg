@@ -68,9 +68,9 @@ local swell_direction = 1
 
 -- LFO configuration
 local min_size = 1
-local max_size = 500
+local max_size = 200
 local min_density = 0
-local max_density = 20
+local max_density = 200
 local min_speed = -100
 local max_speed = 100
 local min_position = 0
@@ -83,6 +83,7 @@ local min_jitter = 0
 local max_jitter = 500
 local min_filter = 0
 local max_filter = 1
+
 
 local previous_regular_params = {}
 local previous_alt_params = {}
@@ -533,7 +534,6 @@ function init_polls()
 end
 
 function init_metros()
-  -- grid refresh timer, 40 fps
   metro_grid_refresh = metro.init(function(stage) grid_refresh() end, 1 / 40)
   metro_grid_refresh:start()
 
@@ -557,7 +557,7 @@ function init_metros()
 
   local metro_arc_update = metro.init(function(stage)
     update_arc_display()
-  end, 1 / 120)
+  end, 1 / 40)
   metro_arc_update:start()
 end
 
@@ -577,20 +577,63 @@ end
 function init_params()
   local sep = ": "
 
+  -- Global Parameters
+  params:add_separator("SAMPLES ")
+  params:add_group("SAMPLES", VOICES)
 
+  for v = 1, VOICES do
+    params:add_file(v .. "sample", v .. " sample")
+    params:set_action(v .. "sample", function(file) engine.read(v, file) end)
+  end
+
+  params:add_separator("Sends")
+  params:add_group("SATURATION", 9)
+
+  params:add_taper("saturation_depth", "saturation_depth", 1, 32, 32, 0)
+  params:set_action("saturation_depth", function(value) engine.saturation_depth(value) end)
+
+  params:add_taper("saturation_rate", "saturation_rate", 1, 48000, 48000, 0)
+  params:set_action("saturation_rate", function(value) engine.saturation_rate(value) end)
+
+  params:add_taper('crossover', 'crossover', 50, 20000, 1400, 0)
+  params:set_action('crossover', function(value) engine.saturation_crossover(value) end)
+
+  params:add_taper('dist', 'dist', 1, 500, 15, 0)
+  params:set_action('dist', function(value) engine.saturation_dist(value) end)
+
+  params:add_taper('low bias', 'low bias', 0.01, 1, 0.04, 0)
+  params:set_action('low bias', function(value) engine.saturation_lowbias(value) end)
+
+  params:add_taper('high bias', 'high bias', 0.01, 1, 0.12, 0)
+  params:set_action('high bias', function(value) engine.saturation_highbias(value) end)
+
+  params:add_taper('hiss', 'hiss', 0, 1, 0, 0)
+  params:set_action('hiss', function(value) engine.saturation_hiss(value) end)
+
+  params:add_taper('cutoff', 'cutoff', 20, 20000, 11500, 0)
+  params:set_action('cutoff', function(value) engine.saturation_cutoff(value) end)
+
+  params:add_taper('output_volume', 'output_volume', 0, 1, 1, 0)
+  params:set_action('output_volume', function(value) engine.saturation_volume(value) end)
+
+
+  params:add_group("REVERB", 3)
+
+  -- Reverb Parameters
+  params:add_taper("reverb_mix", "*" .. sep .. "mix", 0, 100, 100, 0, "%")
+  params:set_action("reverb_mix", function(value) engine.reverb_mix(value / 100) end)
+  params:add_taper("reverb_room", "*" .. sep .. "room", 0, 100, 50, 0, "%")
+  params:set_action("reverb_room", function(value) engine.reverb_room(value / 100) end)
+  params:add_taper("reverb_damp", "*" .. sep .. "damp", 0, 100, 50, 0, "%")
+  params:set_action("reverb_damp", function(value) engine.reverb_damp(value / 100) end)
 
   -- Audio and Granular Parameters
   for v = 1, VOICES do
     params:add_separator("VOICE " .. v)
 
     -- Audio Parameters
-    params:add_group(v .. " AUDIO", 4)
+    params:add_group(v .. " AUDIO", 6)
 
-    params:add_file(v .. "sample", v .. " sample")
-    params:set_action(v .. "sample", function(file) engine.read(v, file) end)
-
-    params:add_taper(v .. "volume", v .. " volume", -60, 20, 0, 0, "dB")
-    params:set_action(v .. "volume", function(value) engine.volume(v, math.pow(10, value / 20)) end)
 
     params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
     params:set_action(v .. "filter", function(value) engine.filter(v, value) end)
@@ -600,35 +643,42 @@ function init_params()
       if value == 1 then start_voice(v, positions[v]) else stop_voice(v) end
     end)
 
+    params:add_separator("LEVELS/SENDS")
+
+    params:add_taper(v .. "volume", v .. " volume", -60, 20, 0, 0, "dB")
+    params:set_action(v .. "volume", function(value) engine.volume(v, math.pow(10, value / 20)) end)
+
+    params:add_taper(v .. "saturation", v .. " Saturation", -60, 20, -60, 0, "dB")
+    params:set_action(v .. "saturation", function(value) engine.saturation(v, math.pow(10, value / 20)) end)
+
+    params:add_taper(v .. "reverb", v .. " reverb", -60, 20, -60, 0, "dB")
+    params:set_action(v .. "reverb", function(value) engine.reverb(v, math.pow(10, value / 20)) end)
+
     -- Granular Parameters
     params:add_group(v .. " GRANULAR", 8)
-    params:add_taper(v .. "speed", v .. sep .. "speed", -200, 200, 100, 0, "%")
+    params:add_taper(v .. "speed", v .. sep .. "speed", min_speed, max_speed, 100, 0, "%")
     params:set_action(v .. "speed", function(value)
       local actual_speed = util.clamp(value, min_speed, max_speed)
       engine.speed(v, actual_speed / 100)
     end)
 
-    params:add_taper(v .. "jitter", v .. sep .. "jitter", 0, 500, 0, 5, "ms")
+    params:add_taper(v .. "jitter", v .. sep .. "jitter", min_jitter, max_jitter, 0, 5, "ms")
     params:set_action(v .. "jitter", function(value) engine.jitter(v, value / 1000) end)
 
-    params:add_taper(v .. "size", v .. sep .. "size", 1, 500, 100, 5, "ms")
-    params:set_action(v .. "size", function(value)
-      local actual_size = util.clamp(value, min_size, max_size)
-      engine.size(v, actual_size / 1000)
-    end)
 
-    params:add_taper(v .. "density", v .. sep .. "density", 0, 20, 20, 6, "hz")
-    params:set_action(v .. "density", function(value)
-      local actual_density = util.clamp(value, min_density, max_density)
-      engine.density(v, actual_density)
-    end)
+    params:add_taper(v .. "size", v .. sep .. "size", min_size, max_size, 100, 5, "ms")
+    params:set_action(v .. "size", function(value) engine.size(v, value / 1000) end)
+
+    params:add_taper(v .. "density", v .. sep .. "density", min_density, max_density, 20, 6, "hz")
+    params:set_action(v .. "density", function(value) engine.density(v, value) end)
+
 
 
 
     params:add {
       type = "control",
       id = v .. "pitch",
-      name = v .. "pitch",
+      name = v .. ": pitch",
       controlspec = controlspec.new(0, 4, "lin", 0.001, 1, "", 0.001),
       action = function(value)
         engine.pitch(v, value)
@@ -695,15 +745,7 @@ function init_params()
   end
 
 
-  -- Reverb Parameters
-  params:add_separator("")
-  params:add_separator("VERB")
-  params:add_taper("reverb_mix", "*" .. sep .. "mix", 0, 100, 50, 0, "%")
-  params:set_action("reverb_mix", function(value) engine.reverb_mix(value / 100) end)
-  params:add_taper("reverb_room", "*" .. sep .. "room", 0, 100, 50, 0, "%")
-  params:set_action("reverb_room", function(value) engine.reverb_room(value / 100) end)
-  params:add_taper("reverb_damp", "*" .. sep .. "damp", 0, 100, 50, 0, "%")
-  params:set_action("reverb_damp", function(value) engine.reverb_damp(value / 100) end)
+
 
   params:add_separator("")
   params:add_separator('header', 'ARC + General')
@@ -736,10 +778,10 @@ function update_arc_display()
     local jitter = params:get(selected_voice .. "jitter")
     local filter = params:get(selected_voice .. "filter")
 
-    display_progress_bar(1, volume, -60, 20)
-    display_spread_pattern(2, spread, 0, 100) -- Update arc for spread
-    display_random_pattern(3, jitter, 0, 500)
-    display_filter_pattern(4, filter, 0, 1)
+    display_progress_bar(1, volume, -60, max_volume)
+    display_spread_pattern(2, spread, 0, max_spread) -- Update arc for spread
+    display_random_pattern(3, jitter, 0, max_jitter)
+    display_filter_pattern(4, filter, 0, max_filter)
   else
     -- Original arc display logic
     local position = positions[selected_voice]
@@ -752,12 +794,12 @@ function update_arc_display()
 
     -- Display speed parameter with markers
     -- Display speed parameter with markers
-    display_progress_bar(2, speed, -200, 200)
+    display_progress_bar(2, speed, min_speed, max_speed)
     display_percent_markers(2, -100, 0, 100)
 
 
-    display_progress_bar(3, size, 1, 500)
-    display_progress_bar(4, density, 0, 20)
+    display_progress_bar(3, size, min_size, max_size)
+    display_progress_bar(4, density, min_density, max_density)
   end
 
   arc_device:refresh()
@@ -977,8 +1019,8 @@ function enc(n, d)
   elseif n == 2 then
     -- Parameter adjustments based on the current screen
     if current_screen == 1 then
-      -- Adjusting 'jitter' instead of 'volume'
-      params:delta(selected_voice .. "jitter", d)
+      -- Adjusting 'filter' instead of 'volume'
+      params:delta(selected_voice .. "filter", d)
     elseif current_screen == 2 then
       params:delta(selected_voice .. "size", d)
     elseif current_screen == 3 then
@@ -994,7 +1036,7 @@ function enc(n, d)
     end
   elseif n == 3 then
     if current_screen == 1 then
-      -- Adjusting 'volume' here since it's now paired with 'jitter'
+      -- Adjusting 'volume' here since it's now paired with 'filter'
       params:delta(selected_voice .. "volume", d)
     elseif current_screen == 2 then
       params:delta(selected_voice .. "density", d)
@@ -1034,10 +1076,10 @@ function redraw()
   local param_y_start = 10
   local line_spacing = 10
 
-  -- First pair: Jitter and Volume
+  -- First pair: Filter and Volume
   screen.move(96, param_y_start)
   screen.level(current_screen == 1 and 15 or 2)
-  screen.text_right("Jitter: " .. string.format("%.2f ms", params:get(selected_voice .. "jitter")))
+  screen.text_right("Filter: " .. string.format("%.2f", params:get(selected_voice .. "filter")))
 
   screen.move(96, param_y_start + line_spacing)
   screen.level(current_screen == 1 and 15 or 2)
