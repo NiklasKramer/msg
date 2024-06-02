@@ -629,22 +629,74 @@ function init_params()
   params:set_action('output_volume', function(value) engine.saturation_volume(value) end)
 
 
-  params:add_group("REVERB", 3)
+  params:add_group("DELAY", 9)
+
+  --delay_delay
+  params:add_taper('delay_time', 'delay', 0.001, 2, 0.2, 0)
+  params:set_action('delay_time', function(value) engine.delay_delay(value) end)
+
+  params:add_taper('delay_feedback', 'delay_feedback', 0.1, 10, 1, 0)
+  params:set_action('delay_feedback', function(value) engine.delay_time(value) end)
+
+  params:add_taper('delay_mix', 'delay_mix', 0, 1, 1, 0)
+  params:set_action('delay_mix', function(value) engine.delay_mix(value) end)
+
+  --delay_lpf
+  params:add_taper('delay_lpf', 'delay_lpf', 20, 20000, 20000, 0)
+  params:set_action('delay_lpf', function(value) engine.delay_lpf(value) end)
+
+  --delay_hpf
+  params:add_taper('delay_hpf', 'delay_hpf', 20, 20000, 20, 0)
+  params:set_action('delay_hpf', function(value) engine.delay_hpf(value) end)
+
+  --delay_w_rate
+  params:add_taper('delay_w_rate', 'delay_w_rate', 0.1, 10, 1, 0)
+  params:set_action('delay_w_rate', function(value) engine.delay_w_rate(value) end)
+
+  --delay_w_depth
+  params:add_taper('delay_w_depth', 'delay_w_depth', 0, 1, 0, 0)
+  params:set_action('delay_w_depth', function(value) engine.delay_w_depth(value / 100) end)
+
+  --delay_rotate
+  params:add_taper('delay_rotate', 'delay_rotate', 0, 1, 0, 0)
+  params:set_action('delay_rotate', function(value) engine.delay_rotate(value) end)
+
+  --delay_max_del
+  params:add_taper('delay_max_del', 'delay_max_del', 0.0, 10, 1, 0)
+  params:set_action('delay_max_del', function(value) engine.delay_max_del(value) end)
+
+
+
+
+
+  params:add_group("REVERB", 5)
 
   -- Reverb Parameters
   params:add_taper("reverb_mix", "*" .. sep .. "mix", 0, 100, 100, 0, "%")
   params:set_action("reverb_mix", function(value) engine.reverb_mix(value / 100) end)
-  params:add_taper("reverb_room", "*" .. sep .. "room", 0, 100, 50, 0, "%")
-  params:set_action("reverb_room", function(value) engine.reverb_room(value / 100) end)
-  params:add_taper("reverb_damp", "*" .. sep .. "damp", 0, 100, 50, 0, "%")
-  params:set_action("reverb_damp", function(value) engine.reverb_damp(value / 100) end)
+
+  params:add_taper("reverb_time", "*" .. sep .. "time", 0.1, 10, 1, 0, "s")
+  params:set_action("reverb_time", function(value) engine.reverb_time(value) end)
+
+  params:add_taper("reverb_lpf", "*" .. sep .. "lpf", 20, 20000, 20000, 0, "hz")
+  params:set_action("reverb_lpf", function(value) engine.reverb_lpf(value) end)
+
+  params:add_taper("reverb_hpf", "*" .. sep .. "hpf", 20, 20000, 20, 0, "hz")
+  params:set_action("reverb_hpf", function(value) engine.reverb_hpf(value) end)
+
+  params:add_taper("reverb_srate", "*" .. sep .. "srate", 0.1, 10, 1, 0, "s")
+  params:set_action("reverb_srate", function(value) engine.reverb_srate(value) end)
+
+
+
+
 
   -- Audio and Granular Parameters
   for v = 1, VOICES do
     params:add_separator("VOICE " .. v)
 
     -- Audio Parameters
-    params:add_group(v .. " AUDIO", 6)
+    params:add_group(v .. " AUDIO", 7)
 
 
     params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
@@ -662,6 +714,9 @@ function init_params()
 
     params:add_taper(v .. "saturation", v .. " saturation", -60, 20, -60, 0, "dB")
     params:set_action(v .. "saturation", function(value) engine.saturation(v, math.pow(10, value / 20)) end)
+
+    params:add_taper(v .. "delay", v .. " delay", -60, 20, -60, 0, "dB")
+    params:set_action(v .. "delay", function(value) engine.delay(v, math.pow(10, value / 20)) end)
 
     params:add_taper(v .. "reverb", v .. " reverb", -60, 20, -60, 0, "dB")
     params:set_action(v .. "reverb", function(value) engine.reverb(v, math.pow(10, value / 20)) end)
