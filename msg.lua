@@ -13,7 +13,7 @@
 -- Key 3: Change screen.
 
 -- Engine and device connections
-engine.name = 'StereoGlut'
+engine.name = 'MSG'
 local LFO = require 'lfo'
 local lfos = {}
 
@@ -71,8 +71,8 @@ local min_size = 1
 local max_size = 200
 local min_density = 0
 local max_density = 200
-local min_speed = -100
-local max_speed = 100
+local min_speed = -200
+local max_speed = 200
 local min_position = 0
 local max_position = 1
 local min_volume = -60
@@ -463,7 +463,7 @@ function grid_key(x, y, z, skip_record)
     end
   end
 
-  if z > 0 then
+  if z == 1 then
     if y > 1 then
       local voice = y - 1
       local new_position = (x - 1) / 16
@@ -473,9 +473,13 @@ function grid_key(x, y, z, skip_record)
         stop_voice(voice)
       else
         -- Start voice with new position
-        positions[voice] = new_position               -- Update the position in the array
-        params:set(voice .. "position", new_position) -- Update the position parameter
-        start_voice(voice)
+        positions[voice] = new_position
+        params:set(voice .. "position", new_position)
+        if params:get(voice .. "hold") == 0 then
+          start_voice(voice)
+        else
+          start_voice(voice)
+        end
       end
     else
       if x == 16 then
@@ -493,7 +497,9 @@ function grid_key(x, y, z, skip_record)
         -- stop, only if alt is not pressed
         if alt then
           local voice = x
-          stop_voice(voice)
+          --toggle hold for voice
+          local hold = params:get(voice .. "hold")
+          params:set(voice .. "hold", hold == 0 and 1 or 0)
         else
           -- select voice
           selected_voice = x
@@ -501,6 +507,12 @@ function grid_key(x, y, z, skip_record)
       end
     end
   else
+    if y > 1 then
+      local voice = y - 1
+      if params:get(voice .. "hold") == 0 then
+        stop_voice(voice)
+      end
+    end
     -- release alt
     if x == 16 and y == 1 then alt = false end
   end
@@ -638,7 +650,7 @@ function init_params()
     params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
     params:set_action(v .. "filter", function(value) engine.filter(v, value) end)
 
-    params:add_binary(v .. "play_stop", v .. " Play/Stop", "toggle", 0)
+    params:add_binary(v .. "play_stop", v .. " play/stop", "toggle", 0)
     params:set_action(v .. "play_stop", function(value)
       if value == 1 then start_voice(v, positions[v]) else stop_voice(v) end
     end)
@@ -648,19 +660,43 @@ function init_params()
     params:add_taper(v .. "volume", v .. " volume", -60, 20, 0, 0, "dB")
     params:set_action(v .. "volume", function(value) engine.volume(v, math.pow(10, value / 20)) end)
 
-    params:add_taper(v .. "saturation", v .. " Saturation", -60, 20, -60, 0, "dB")
+    params:add_taper(v .. "saturation", v .. " saturation", -60, 20, -60, 0, "dB")
     params:set_action(v .. "saturation", function(value) engine.saturation(v, math.pow(10, value / 20)) end)
 
     params:add_taper(v .. "reverb", v .. " reverb", -60, 20, -60, 0, "dB")
     params:set_action(v .. "reverb", function(value) engine.reverb(v, math.pow(10, value / 20)) end)
 
     -- Granular Parameters
-    params:add_group(v .. " GRANULAR", 8)
+    params:add_group(v .. " GRANULAR", 7)
+    params:add {
+      type = "control",
+      id = v .. "pitch",
+      name = v .. ": pitch",
+      controlspec = controlspec.new(0, 4, "lin", 0.001, 1, "", 0.001),
+      action = function(value)
+        engine.pitch(v, value)
+      end
+    }
     params:add_taper(v .. "speed", v .. sep .. "speed", min_speed, max_speed, 100, 0, "%")
     params:set_action(v .. "speed", function(value)
       local actual_speed = util.clamp(value, min_speed, max_speed)
       engine.speed(v, actual_speed / 100)
     end)
+
+    -- Voice Position
+    params:add {
+      type = "control",
+      id = v .. "position",
+      name = v .. sep .. " Position",
+      controlspec = controlspec.new(0, 1, "lin", 0, 0, ""),
+      action = function(value)
+        local actual_position = util.clamp(value, 0, 1)
+        positions[v] = actual_position
+        if gates[v] > 0 then
+          engine.seek(v, actual_position)
+        end
+      end
+    }
 
     params:add_taper(v .. "jitter", v .. sep .. "jitter", min_jitter, max_jitter, 0, 5, "ms")
     params:set_action(v .. "jitter", function(value) engine.jitter(v, value / 1000) end)
@@ -675,36 +711,28 @@ function init_params()
 
 
 
-    params:add {
-      type = "control",
-      id = v .. "pitch",
-      name = v .. ": pitch",
-      controlspec = controlspec.new(0, 4, "lin", 0.001, 1, "", 0.001),
-      action = function(value)
-        engine.pitch(v, value)
-      end
-    }
-
     params:add_taper(v .. "spread", v .. sep .. "spread", 0, 100, 0, 0, "%")
     params:set_action(v .. "spread", function(value) engine.spread(v, value / 100) end)
 
-    params:add_taper(v .. "fade", v .. sep .. "att / dec", 1, 9000, 1000, 3, "ms")
+
+    params:add_group(v .. " ENV", 5)
+
+    params:add_taper(v .. "fade", v .. sep .. "att / dec", 0, 9000, 1000, 0, "ms")
     params:set_action(v .. "fade", function(value) engine.envscale(v, value / 1000) end)
 
-    -- Voice Position
-    params:add {
-      type = "control",
-      id = v .. "position",
-      name = v .. " Position",
-      controlspec = controlspec.new(0, 1, "lin", 0, 0, ""),
-      action = function(value)
-        local actual_position = util.clamp(value, 0, 1)
-        positions[v] = actual_position
-        if gates[v] > 0 then
-          engine.seek(v, actual_position)
-        end
-      end
-    }
+    params:add_taper(v .. "attack", v .. sep .. "attack", 0, 10, 1, 0)
+    params:set_action(v .. "attack", function(value) engine.attack(v, value) end)
+
+    params:add_taper(v .. "sustain", v .. sep .. "sustain", 0, 10, 1, 0)
+    params:set_action(v .. "sustain", function(value) engine.sustain(v, value) end)
+
+    params:add_taper(v .. "release", v .. sep .. "release", 0, 10, 1, 0)
+    params:set_action(v .. "release", function(value) engine.release(v, value) end)
+
+    -- add param called hold, that can be on or off (0 or 1)
+    params:add_binary(v .. "hold", v .. sep .. "hold", "toggle", 1)
+
+
 
     for lfo_num = 1, 4 do
       local lfo_id = v .. "_lfo" .. lfo_num
@@ -713,28 +741,24 @@ function init_params()
       params:add_group(v .. " LFO " .. lfo_num, 5)
 
       -- Rate
-      params:add_taper(lfo_id .. "_rate", "LFO " .. lfo_num .. " Rate", 0.001, 20, 0.5, 0, "Sec")
+      params:add_taper(lfo_id .. "_rate", "LFO " .. lfo_num .. " rate", 0.001, 20, 0.5, 0, "Sec")
       params:set_action(lfo_id .. "_rate", function(value)
         lfos[v][lfo_num]:set('period', value)
       end)
 
       -- Depth
-      params:add_taper(lfo_id .. "_depth", "LFO " .. lfo_num .. " Depth", 0, 1, 0.5, 0)
+      params:add_taper(lfo_id .. "_depth", "LFO " .. lfo_num .. " depth", 0, 1, 0.5, 0)
       params:set_action(lfo_id .. "_depth", function(value)
         lfos[v][lfo_num]:set('depth', value)
       end)
 
       -- Enable
-      params:add_binary(lfo_id .. "_enable", "LFO " .. lfo_num .. " Enable", "toggle", 0)
+      params:add_binary(lfo_id .. "_enable", "LFO " .. lfo_num .. " enable", "toggle", 0)
       params:set_action(lfo_id .. "_enable", function(value)
         if value == 1 then lfos[v][lfo_num]:start() else lfos[v][lfo_num]:stop() end
       end)
 
       add_lfo_target_param(v, lfo_num)
-
-
-
-
 
       -- Offset
       params:add_taper(lfo_id .. "_offset", "LFO " .. lfo_num .. " Offset", -1, 1, 0, 0)
