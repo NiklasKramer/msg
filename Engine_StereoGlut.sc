@@ -4,9 +4,11 @@ Engine_MSG : CroneEngine {
 
 	var pg;
 	var reverb;
+	var delay;
 	var <buffers;
 	var <voices;
 	var reverbBus;
+	var delayBus;
 	var saturation;
 	var saturationBus;
 	var <phases;
@@ -17,6 +19,8 @@ Engine_MSG : CroneEngine {
 	*new { arg context, doneCallback;
 		^super.new(context, doneCallback);
 	}
+
+
 
 	// disk read
 	readBuf { arg i, path;
@@ -74,7 +78,7 @@ Engine_MSG : CroneEngine {
 		});
 
 		SynthDef(\synth, {
-			arg out=0, phase_out=0, level_out=0, saturation_out=0, saturation_level=0, reverb_out=0, reverb_level=0, buf1, buf2,
+			arg out=0, phase_out=0, level_out=0, saturation_out=0, saturation_level=0, delay_out=0, delay_level=0, reverb_out=0, reverb_level=0, buf1, buf2,
 			gate=0, pos=0, speed=1, jitter=0,
 			size=0.1, density=20, pitch=1, spread=0, gain=1, envscale=1,attack=1, sustain=1, release=1,
 			freeze=0, t_reset_pos=0, filterControl=0.5; // Added filterControl parameter
@@ -110,6 +114,7 @@ Engine_MSG : CroneEngine {
 
 			Out.ar(out, filtered * level * gain);
 			Out.ar(saturation_out, filtered * level * saturation_level);
+			Out.ar(delay_out, filtered * level * delay_level);
 			Out.ar(reverb_out, filtered * level * reverb_level);
 			Out.kr(phase_out, pos_sig);
 			// Ignore gain for level out to maintain original logic
@@ -186,26 +191,66 @@ Engine_MSG : CroneEngine {
 			Out.ar(out, processed * outVolume);
 		}).add;
 
+		// Delay SynthDef
+		SynthDef(\td_22, {|out=0, in=32, delay=0.2, time=10, hpf=330, lpf=8200, w_rate=0.667, w_depth=0.00027, rotate=0.0, mix=0.2, i_max_del=8|
+			var sig, mod, del, fbs, fb;
+			
+			sig = In.ar(in, 2);
+			fb = exp(log(0.001) * (delay / time));
 
-		SynthDef(\reverb, {
-			arg in, out, mix=0.5, room=0.5, damp=0.5;
-			var sig = In.ar(in, 2);
-			sig = FreeVerb.ar(sig, mix, room, damp);
-			Out.ar(out, sig);
+			mod = LFPar.kr(w_rate, mul: w_depth);
+			fbs = LocalIn.ar(2);
+			fbs = Rotate2.ar(fbs[0], fbs[1], rotate).softclip;
+			del = DelayL.ar(Limiter.ar(Mix([fbs * fb, sig]), 0.99, 0.01), i_max_del, delay + mod);
+			del = LPF.ar(HPF.ar(del, hpf), lpf);
+			LocalOut.ar(del);
+			Out.ar(out, 1 - mix * sig + (mix * del));
 		}).add;
 
+		// Reverb SynthDef
+		SynthDef(\scverb_12, {|out=0, in=22, mix=1, time=5, lpf=8200, hpf=20, srate=0|
+			var apj, sig, mods, delays, dts, fbs, fb, filts, filteredSig;
+			sig = In.ar(in).dup;
+			dts = Select.kr(srate, [
+				[0.056077097505669, 0.062743764172336, 0.072947845804989, 0.080657596371882, 0.08859410430839, 0.093582766439909, 0.04859410430839, 0.043832199546485],
+				[0.056104166666667, 0.062729166666667, 0.073145833333333, 0.080770833333333, 0.088604166666667, 0.093604166666667, 0.048604166666667, 0.043729166666667],
+				[0.056052083333333, 0.062802083333333, 0.072927083333333, 0.080635416666667, 0.088552083333333, 0.093739583333333, 0.048572916666667, 0.043760416666667]
+			]);
+			// Integrating calcFeedback logic
+			fb = exp(log(0.001) * (0.089 / time));
+
+			mods = LFNoise2.kr([3.1, 3.5, 1.110, 3.973, 2.341, 1.897, 0.891, 3.221],
+				[0.0010, 0.0011, 0.0017, 0.0006, 0.0010, 0.0011, 0.0017, 0.0006]
+			);
+			fbs = LocalIn.ar(8);
+			apj = 0.25 * Mix.ar(fbs);
+			delays = DelayC.ar(sig - fbs + apj, 1, dts + mods);
+			filts = LPF.ar(delays * fb, lpf);
+			// Adding High-Pass Filter
+			filteredSig = HPF.ar(filts, hpf);
+			LocalOut.ar(DelayC.ar(filteredSig, ControlRate.ir.reciprocal, ControlRate.ir.reciprocal));
+			Out.ar(out,
+				1 - mix * sig + (mix * 0.35 * [Mix.ar([filteredSig[0], filteredSig[2], filteredSig[4], filteredSig[6]]), Mix.ar([filteredSig[1], filteredSig[3], filteredSig[5], filteredSig[7]])])
+			);
+		}).add;
+
+		
+		
+		
+
+	
 		context.server.sync;
 
-		// mix bus for all synth outputs
-		reverbBus =  Bus.audio(context.server, 2);
-		saturationBus = Bus.audio(context.server, 2);
+	
 
 		// Allocate and initialize buses
         reverbBus = Bus.audio(context.server, 2); // Mix bus for all synth outputs
+		delayBus = Bus.audio(context.server, 2); // Delay bus
         saturationBus = Bus.audio(context.server, 2); // Saturation bus
 
         // Initialize reverb and saturation synths
-        reverb = Synth.new(\reverb, [\in, reverbBus, \out, context.out_b.index], target: context.xg);
+		reverb = Synth.new(\scverb_12, [\in, reverbBus, \out, context.out_b.index], target: context.xg);
+		delay = Synth.new(\td_22, [\in, delayBus, \out, context.out_b.index], target: context.xg);
         saturation = Synth.new(\saturator, [\in, saturationBus, \out, context.out_b.index], target: context.xg);
 
 
@@ -222,6 +267,7 @@ Engine_MSG : CroneEngine {
 				
 				\saturation_out, saturationBus.index,
 				\reverb_out, reverbBus.index,
+				\delay_out, delayBus.index,
 
 				\buf1, buffers[i][0],
 				\buf2, buffers[i][0]
@@ -230,14 +276,28 @@ Engine_MSG : CroneEngine {
 
 		context.server.sync;
 
+		// REVERB
+		this.addCommand("reverb_time", "f", { arg msg; reverb.set(\time, msg[1]); });
 		this.addCommand("reverb_mix", "f", { arg msg; reverb.set(\mix, msg[1]); });
-		this.addCommand("reverb_room", "f", { arg msg; reverb.set(\room, msg[1]); });
-		this.addCommand("reverb_damp", "f", { arg msg; reverb.set(\damp, msg[1]); });
+		this.addCommand("reverb_lpf", "f", { arg msg; reverb.set(\lpf, msg[1]); });
+		this.addCommand("reverb_hpf", "f", { arg msg; reverb.set(\hpf, msg[1]); });
+		this.addCommand("reverb_srate", "f", { arg msg; reverb.set(\srate, msg[1]); });
 
+		// DELAY
+		this.addCommand("delay_delay", "f", { arg msg; delay.set(\delay, msg[1]); });
+		this.addCommand("delay_time", "f", { arg msg; delay.set(\time, msg[1]); });
+		this.addCommand("delay_mix", "f", { arg msg; delay.set(\mix, msg[1]); });
+		this.addCommand("delay_lpf", "f", { arg msg; delay.set(\lpf, msg[1]); });
+		this.addCommand("delay_hpf", "f", { arg msg; delay.set(\hpf, msg[1]); });
+		this.addCommand("delay_w_rate", "f", { arg msg; delay.set(\w_rate, msg[1]); });
+		this.addCommand("delay_w_depth", "f", { arg msg; delay.set(\w_depth, msg[1]); });
+		this.addCommand("delay_rotate", "f", { arg msg; delay.set(\rotate, msg[1]); });
+		this.addCommand("delay_max_del", "f", { arg msg; delay.set(\i_max_del, msg[1]); });
+
+		// SATURATION
 		this.addCommand("saturation_depth", "f", { arg msg; saturation.set(\sdepth, msg[1]); });
 		this.addCommand("saturation_rate", "f", { arg msg; saturation.set(\srate, msg[1]); });
 		this.addCommand("saturation_crossover", "f", { arg msg; saturation.set(\crossover, msg[1]); });
-
 		this.addCommand("saturation_dist", "f", { arg msg; saturation.set(\distAmount, msg[1]); });
 		this.addCommand("saturation_lowbias", "f", { arg msg; saturation.set(\lowbias, msg[1]); });
 		this.addCommand("saturation_highbias", "f", { arg msg; saturation.set(\highbias, msg[1]); });
@@ -362,6 +422,11 @@ Engine_MSG : CroneEngine {
 			voices[voice].set(\saturation_level, msg[2]);
 		});
 
+		this.addCommand("delay", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\delay_level, msg[2]);
+		});
+
 		this.addCommand("reverb", "if", { arg msg;
 			var voice = msg[1] - 1;
 			voices[voice].set(\reverb_level, msg[2]);
@@ -392,6 +457,9 @@ Engine_MSG : CroneEngine {
 		buffers.do({ arg b; b.do(_.free); });
 		reverb.free;
 		reverbBus.free;
+		delay.free;
+		delayBus.free;
+		saturation.free;
 		saturationBus.free;
 	}
 }
