@@ -1,5 +1,5 @@
 
-Engine_StereoGlut : CroneEngine {
+Engine_MSG : CroneEngine {
 	classvar nvoices = 7;
 
 	var pg;
@@ -76,7 +76,7 @@ Engine_StereoGlut : CroneEngine {
 		SynthDef(\synth, {
 			arg out=0, phase_out=0, level_out=0, saturation_out=0, saturation_level=0, reverb_out=0, reverb_level=0, buf1, buf2,
 			gate=0, pos=0, speed=1, jitter=0,
-			size=0.1, density=20, pitch=1, spread=0, gain=1, envscale=1,
+			size=0.1, density=20, pitch=1, spread=0, gain=1, envscale=1,attack=1, sustain=1, release=1,
 			freeze=0, t_reset_pos=0, filterControl=0.5; // Added filterControl parameter
 
 			var grain_trig, jitter_sig, buf_dur, pan_sig, buf_pos, pos_sig, sig;
@@ -90,7 +90,8 @@ Engine_StereoGlut : CroneEngine {
 			pos_sig = Wrap.kr(Select.kr(freeze, [buf_pos, pos]));
 
 			sig = Mix.ar(GrainBuf.ar(2, grain_trig, size, [buf1, buf2], pitch, pos_sig + jitter_sig, 2, ([-1, 1] + pan_sig).clip(-1, 1)))/2;
-			env = EnvGen.kr(Env.asr(1, 1, 1), gate: gate, timeScale: envscale);
+			env = EnvGen.kr(Env.asr(attack, sustain, release), gate: gate, timeScale: envscale);
+
 			level = env;
 
 			// Filter logic adapted from vintageSamplerEmu
@@ -339,6 +340,21 @@ Engine_StereoGlut : CroneEngine {
 		this.addCommand("envscale", "if", { arg msg;
 			var voice = msg[1] - 1;
 			voices[voice].set(\envscale, msg[2]);
+		});
+
+		this.addCommand("attack", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\attack, msg[2]);
+		});
+
+		this.addCommand("sustain", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\sustain, msg[2]);
+		});
+
+		this.addCommand("release", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\release, msg[2]);
 		});
 
 		this.addCommand("saturation", "if", { arg msg;
