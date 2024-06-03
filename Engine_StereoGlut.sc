@@ -1,6 +1,6 @@
 
 Engine_MSG : CroneEngine {
-	classvar nvoices = 7;
+	classvar nvoices = 12;
 
 	var pg;
 	var reverb;
