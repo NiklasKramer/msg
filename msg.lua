@@ -27,8 +27,8 @@ local alt_params = { "volume", "spread", "jitter", "filter" }
 
 -- Voice and control parameters
 local selected_voice = 1
-local VOICES = 7
-local RECORDER = 6
+local VOICES = 12
+local RECORDER = 12
 local current_screen = 1
 
 -- Voice state tracking
@@ -43,8 +43,8 @@ end
 
 -- Grid display buffers
 local gridbuf = require 'lib/gridbuf'
-local grid_ctl = gridbuf.new(16, 8)
-local grid_voc = gridbuf.new(16, 8)
+local grid_ctl = gridbuf.new(16, 16)
+local grid_voc = gridbuf.new(16, 16)
 
 -- Metronome (metro) instances
 local metro_grid_refresh
@@ -415,7 +415,11 @@ local function grid_refresh()
       voice_level = math.floor(swell) -- Apply swell effect when any voice is playing
     end
 
-    grid_ctl:led_level_set(i, 1, voice_level)
+    if i <= 6 then
+      grid_ctl:led_level_set(i, 1, voice_level)
+    else
+      grid_ctl:led_level_set(i - 6, 2, voice_level)
+    end
   end
 
   -- Recorder controls
@@ -432,7 +436,9 @@ local function grid_refresh()
       end
     end
 
-    grid_ctl:led_level_set(i + 8, 1, level) -- Adjusted to start from the 9th column
+    local row = (i <= 6) and 1 or 2 -- Place first 6 in the first row, next 6 in the second row
+    local col = ((i - 1) % 6) + 9   -- Place recorders in columns 9 to 14
+    grid_ctl:led_level_set(col, row, level)
   end
 
   if arc_alt_mode then
@@ -441,13 +447,19 @@ local function grid_refresh()
 
   -- blink armed pattern
   if record_bank > 0 then
-    grid_ctl:led_level_set(8 + record_bank, 1, 10 * blink)
+    local row = (record_bank <= 6) and 1 or 2
+    local col = ((record_bank - 1) % 6) + 9
+    grid_ctl:led_level_set(col, row, 10 * blink)
   end
 
   -- voice positions
   for i = 1, VOICES do
     if voice_levels[i] > 0 then
-      grid_voc:led_level_row(1, i + 1, display_voice(positions[i], 16))
+      if i <= 6 then
+        grid_voc:led_level_row(1, i + 2, display_voice(positions[i], 16))
+      else
+        grid_voc:led_level_row(1, (i - 6) + 8, display_voice(positions[i], 16))
+      end
     end
   end
 
@@ -455,6 +467,8 @@ local function grid_refresh()
   buf:render(grid_device)
   grid_device:refresh()
 end
+
+
 
 function grid_key(x, y, z, skip_record)
   if y > 1 or (y == 1 and x < 9) then
@@ -464,8 +478,8 @@ function grid_key(x, y, z, skip_record)
   end
 
   if z == 1 then
-    if y > 1 then
-      local voice = y - 1
+    if y > 2 then
+      local voice = y - 2
       local new_position = (x - 1) / 16
 
       if alt and gates[voice] > 0 then
@@ -482,33 +496,11 @@ function grid_key(x, y, z, skip_record)
         end
       end
     else
-      if x == 16 then
-        -- alt
-        alt = true
-      elseif x == 15 then
-        -- Toggle arc screen mode
-        arc_alt_mode = not arc_alt_mode
-      elseif x > 8 and x < 15 then
-        -- record handler
-        record_handler(x - 8)
-      elseif x == 8 then
-        -- reserved
-      elseif x < 8 then
-        -- stop, only if alt is not pressed
-        if alt then
-          local voice = x
-          --toggle hold for voice
-          local hold = params:get(voice .. "hold")
-          params:set(voice .. "hold", hold == 0 and 1 or 0)
-        else
-          -- select voice
-          selected_voice = x
-        end
-      end
+      topbar_key(x, y, z)
     end
   else
-    if y > 1 then
-      local voice = y - 1
+    if y > 2 then
+      local voice = y - 2
       if params:get(voice .. "hold") == 0 then
         stop_voice(voice)
       end
@@ -517,6 +509,39 @@ function grid_key(x, y, z, skip_record)
     if x == 16 and y == 1 then alt = false end
   end
   redraw()
+end
+
+function topbar_key(x, y, z)
+  if y == 1 or y == 2 then
+    if x == 16 and y == 1 then
+      -- alt
+      alt = true
+    elseif x == 15 and y == 1 then
+      -- Toggle arc screen mode
+      arc_alt_mode = not arc_alt_mode
+    elseif x > 8 and x < 15 then
+      -- record handler
+      recorder = (x - 8) + 6 * (y - 1)
+      record_handler(recorder)
+    elseif x == 8 then
+      -- reserved
+    elseif x < 7 then
+      -- stop, only if alt is not pressed
+      if alt then
+        local voice = x + 6 * (y - 1)
+        --toggle hold for voice
+        local hold = params:get(voice .. "hold")
+        params:set(voice .. "hold", hold == 0 and 1 or 0)
+      else
+        selected_voice = x + 6 * (y - 1)
+      end
+    end
+  end
+
+  if z == 0 then
+    -- release alt
+    if x == 16 and y == 1 then alt = false end
+  end
 end
 
 function setup_grid_key()
@@ -1145,45 +1170,46 @@ function redraw()
   screen.clear()
 
   -- Display selected track number at the top with large font
-  screen.move(10, 20)
+  screen.move(20, 20)
   screen.level(gates[selected_voice] > 0 and 15 or 2)
   screen.font_size(24)
-  screen.text_right(selected_voice)
+  screen.text_right(string.format(selected_voice))
   screen.font_size(8)
 
   -- Set the start position for parameter display
   local param_y_start = 10
+  local param_x_start = 100
   local line_spacing = 10
 
   -- First pair: Filter and Volume
-  screen.move(96, param_y_start)
+  screen.move(param_x_start, param_y_start)
   screen.level(current_screen == 1 and 15 or 2)
   screen.text_right("Filter: " .. string.format("%.2f", params:get(selected_voice .. "filter")))
 
-  screen.move(96, param_y_start + line_spacing)
+  screen.move(param_x_start, param_y_start + line_spacing)
   screen.level(current_screen == 1 and 15 or 2)
   screen.text_right("Volume: " .. string.format("%.2f dB", params:get(selected_voice .. "volume")))
 
   -- Second pair: Size and Density
-  screen.move(96, param_y_start + 2 * line_spacing)
+  screen.move(param_x_start, param_y_start + 2 * line_spacing)
   screen.level(current_screen == 2 and 15 or 2)
   screen.text_right("Size: " .. string.format("%.2f ms", params:get(selected_voice .. "size")))
 
-  screen.move(96, param_y_start + 3 * line_spacing)
+  screen.move(param_x_start, param_y_start + 3 * line_spacing)
   screen.level(current_screen == 2 and 15 or 2)
   screen.text_right("Density: " .. string.format("%.2f Hz", params:get(selected_voice .. "density")))
 
   -- Third pair: Position and Speed
-  screen.move(96, param_y_start + 4 * line_spacing)
+  screen.move(param_x_start, param_y_start + 4 * line_spacing)
   screen.level(current_screen == 3 and 15 or 2)
   screen.text_right("Position: " .. string.format("%.2f", positions[selected_voice]))
 
-  screen.move(96, param_y_start + 5 * line_spacing)
+  screen.move(param_x_start, param_y_start + 5 * line_spacing)
   screen.level(current_screen == 3 and 15 or 2)
   screen.text_right("Speed: " .. string.format("%.2f%%", params:get(selected_voice .. "speed")))
 
   -- Vertical track line and position indicator
-  local trackLineX = 120
+  local trackLineX = 125
   local trackLineLength = 60
   local trackLineYStart = 2
   local trackLineYEnd = trackLineYStart + trackLineLength
