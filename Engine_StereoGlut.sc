@@ -89,10 +89,13 @@ Engine_MSG : CroneEngine {
 
 			grain_trig = Impulse.kr(density);
 			buf_dur = BufDur.kr(buf1);
-			pan_sig = TRand.kr(grain_trig, spread.neg, spread);
-			jitter_sig = TRand.kr(grain_trig, buf_dur.reciprocal.neg * jitter, buf_dur.reciprocal * jitter);
-			buf_pos = Phasor.kr(t_reset_pos, buf_dur.reciprocal / ControlRate.ir * speed, 0, 1, pos);
+			pan_sig = TRand.kr(trig: grain_trig, lo: spread.neg, hi: spread);
+			jitter_sig = TRand.kr(trig: grain_trig, lo: buf_dur.reciprocal.neg * jitter, hi: buf_dur.reciprocal * jitter);
+			buf_pos = Phasor.kr(trig: t_reset_pos, rate: buf_dur.reciprocal / ControlRate.ir * speed, resetPos: pos);
+			// buf_pos = Phasor.kr(t_reset_pos, buf_dur.reciprocal / ControlRate.ir * speed, 0, 1, pos);
 			pos_sig = Wrap.kr(Select.kr(freeze, [buf_pos, pos]));
+			
+			// bufrd only
 			t_buf_pos = Phasor.ar(
 				trig: t_reset_pos, 
 				rate: BufRateScale.kr(bufnum: buf1) * speed, 
@@ -100,9 +103,12 @@ Engine_MSG : CroneEngine {
 				end: BufFrames.kr(bufnum: buf1), 
 				resetPos: pos * BufFrames.kr(bufnum: buf1)
 			); 
+			
 			tremolo = 1 + (density/100 * SinOsc.kr(size*100).range(-1, 1));
 
+
 			sig = Select.ar(useBufRd, [
+				
 				Mix.ar(GrainBuf.ar(2, grain_trig, size, [buf1, buf2], pitch, pos_sig + jitter_sig, 2, ([-1, 1] + pan_sig).clip(-1, 1))) / 2,
 				{
 					buf_rd_left = BufRd.ar(1, buf1, t_buf_pos, loop: 1) * tremolo;
