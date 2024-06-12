@@ -721,7 +721,7 @@ function init_params()
     params:add_separator("VOICE " .. v)
 
     -- Audio Parameters
-    params:add_group(v .. " AUDIO", 7)
+    params:add_group(v .. " AUDIO", 8)
 
 
     params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
@@ -731,6 +731,11 @@ function init_params()
     params:set_action(v .. "play_stop", function(value)
       if value == 1 then start_voice(v, positions[v]) else stop_voice(v) end
     end)
+
+    -- add param to switch between granular and buffer playback
+    params:add_binary(v .. "granular", v .. " granular/buffer", "toggle", 0)
+    params:set_action(v .. "granular", function(value) engine.useBufRd(v, value) end)
+
 
     params:add_separator("LEVELS/SENDS")
 
@@ -1170,11 +1175,27 @@ function redraw()
   screen.clear()
 
   -- Display selected track number at the top with large font
-  screen.move(20, 20)
+  local track_number_x = 20
+  local track_number_y = 20
+  screen.move(track_number_x, track_number_y)
   screen.level(gates[selected_voice] > 0 and 15 or 2)
   screen.font_size(24)
   screen.text_right(string.format(selected_voice))
   screen.font_size(8)
+
+  -- Underline the track number if hold is off
+  if params:get(selected_voice .. "hold") == 0 then
+    local underline_start_x = track_number_x - 40
+    local underline_end_x = track_number_x + 2
+    local underline_y = track_number_y + 2
+
+    -- Draw a thicker line by drawing multiple lines close to each other
+    for i = 0, 1 do
+      screen.move(underline_start_x, underline_y + i)
+      screen.line(underline_end_x, underline_y + i)
+      screen.stroke()
+    end
+  end
 
   -- Set the start position for parameter display
   local param_y_start = 10
