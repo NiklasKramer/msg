@@ -80,25 +80,40 @@ Engine_MSG : CroneEngine {
 		SynthDef(\synth, {
 			arg out=0, phase_out=0, level_out=0, saturation_out=0, saturation_level=0, delay_out=0, delay_level=0, reverb_out=0, reverb_level=0, buf1, buf2,
 			gate=0, pos=0, speed=1, jitter=0,
-			size=0.1, density=20, pitch=1, spread=0, gain=1, envscale=1,attack=1, sustain=1, release=1,
-			freeze=0, t_reset_pos=0, filterControl=0.5; // Added filterControl parameter
+			size=0.1, density=20, pitch=1, spread=0, gain=1, envscale=1, attack=1, sustain=1, release=1,
+			freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1;
 
-			var grain_trig, jitter_sig, buf_dur, pan_sig, buf_pos, pos_sig, sig;
-			var env, level, filtered, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass;
+			var grain_trig, jitter_sig, buf_dur, pan_sig, buf_pos, pos_sig, sig, t_buf_pos, t_pos_sig;
+			var env, level, filtered, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, tremolo;
+			var buf_rd_left, buf_rd_right;
 
 			grain_trig = Impulse.kr(density);
 			buf_dur = BufDur.kr(buf1);
-			pan_sig = TRand.kr(trig: grain_trig, lo: spread.neg, hi: spread);
-			jitter_sig = TRand.kr(trig: grain_trig, lo: buf_dur.reciprocal.neg * jitter, hi: buf_dur.reciprocal * jitter);
-			buf_pos = Phasor.kr(trig: t_reset_pos, rate: buf_dur.reciprocal / ControlRate.ir * speed, resetPos: pos);
+			pan_sig = TRand.kr(grain_trig, spread.neg, spread);
+			jitter_sig = TRand.kr(grain_trig, buf_dur.reciprocal.neg * jitter, buf_dur.reciprocal * jitter);
+			buf_pos = Phasor.kr(t_reset_pos, buf_dur.reciprocal / ControlRate.ir * speed, 0, 1, pos);
 			pos_sig = Wrap.kr(Select.kr(freeze, [buf_pos, pos]));
+			t_buf_pos = Phasor.ar(
+				trig: t_reset_pos, 
+				rate: BufRateScale.kr(bufnum: buf1) * speed, 
+				start: 0, 
+				end: BufFrames.kr(bufnum: buf1), 
+				resetPos: pos * BufFrames.kr(bufnum: buf1)
+			); 
+			tremolo = 1 + (density/100 * SinOsc.kr(size*100).range(-1, 1));
 
-			sig = Mix.ar(GrainBuf.ar(2, grain_trig, size, [buf1, buf2], pitch, pos_sig + jitter_sig, 2, ([-1, 1] + pan_sig).clip(-1, 1)))/2;
+			sig = Select.ar(useBufRd, [
+				Mix.ar(GrainBuf.ar(2, grain_trig, size, [buf1, buf2], pitch, pos_sig + jitter_sig, 2, ([-1, 1] + pan_sig).clip(-1, 1))) / 2,
+				{
+					buf_rd_left = BufRd.ar(1, buf1, t_buf_pos, loop: 1) * tremolo;
+					buf_rd_right = BufRd.ar(1, buf2, t_buf_pos, loop: 1) * tremolo;
+					[buf_rd_left, buf_rd_right]
+				}
+			]);
+
 			env = EnvGen.kr(Env.asr(attack, sustain, release), gate: gate, timeScale: envscale);
-
 			level = env;
 
-			// Filter logic adapted from vintageSamplerEmu
 			cutoffFreqLPF = LinExp.kr(filterControl.clip(0, 0.5) * 2, 0, 1, 20, 15000);
 			cutoffFreqHPF = LinExp.kr((filterControl - 0.5).clip(0, 0.5) * 2, 0, 1, 20, 15000);
 
@@ -116,10 +131,19 @@ Engine_MSG : CroneEngine {
 			Out.ar(saturation_out, filtered * level * saturation_level);
 			Out.ar(delay_out, filtered * level * delay_level);
 			Out.ar(reverb_out, filtered * level * reverb_level);
-			Out.kr(phase_out, pos_sig);
-			// Ignore gain for level out to maintain original logic
+
+			Out.kr(phase_out, Select.kr(useBufRd, [pos_sig, t_buf_pos / BufFrames.kr(buf1)]));
 			Out.kr(level_out, level);
 		}).add;
+
+
+
+
+
+
+
+
+
 
 		SynthDef(\saturator, { |in=0, out=0, srate=48000, sdepth=32, crossover=1400, distAmount=15, lowbias=0.04, highbias=0.12, hissAmount=0.0, cutoff=11500, outVolume=1|
 			var input = In.ar(in, 2);  // Read 2 channels from the input
@@ -431,6 +455,14 @@ Engine_MSG : CroneEngine {
 			var voice = msg[1] - 1;
 			voices[voice].set(\reverb_level, msg[2]);
 		});
+
+		this.addCommand("useBufRd", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\useBufRd, msg[2]);
+		});
+	
+		
+		
 
 	
 		nvoices.do({ arg i;
