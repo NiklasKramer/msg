@@ -79,16 +79,14 @@ Engine_MSG : CroneEngine {
 
 		SynthDef(\synth, {
 			arg out=0, phase_out=0, level_out=0, saturation_out=0, saturation_level=0, delay_out=0, delay_level=0, reverb_out=0, reverb_level=0, pan=0, buf1, buf2,
-			gate=0, pos=0, speed=1, jitter=0,
-			size=0.1, density=20, pitch=1, spread=0, gain=1, envscale=1, attack=1, sustain=1, release=1,
+			gate=0, pos=0, speed=1, jitter=0, fade=0.5,
+			size=0.1, density=20, finetune=1, semitones=0, spread=0, gain=1, envscale=1, attack=1, sustain=1, release=1,
 			freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1;
 			
 			var grain_trig, jitter_sig, buf_dur, pan_sig, buf_pos, pos_sig, sig, t_buf_pos_a, t_buf_pos_b, t_pos_sig;
 			var env, level, filtered, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, tremolo;
 			var buf_rd_left_a, buf_rd_right_a, buf_rd_left_b, buf_rd_right_b, aOrB, crossfade, reset_pos_a, reset_pos_b;
-			var jitter_lfo_freq, jitter_lfo_depth, jitter_lfo, jitter_rate, stereo_sig;
-
-
+			var jitter_lfo_freq, jitter_lfo_depth, jitter_lfo, jitter_rate, stereo_sig, pitch, semitones_in_hz;
 
 			grain_trig = Impulse.kr(density);
 			buf_dur = BufDur.kr(buf1);
@@ -100,16 +98,16 @@ Engine_MSG : CroneEngine {
 
 			// bufrd only
 			aOrB = ToggleFF.kr(t_reset_pos);
-			crossfade = Lag.ar(K2A.ar(aOrB), 0.5);
+			crossfade = Lag.ar(K2A.ar(aOrB), fade);
 			reset_pos_a = Latch.kr(pos * BufFrames.kr(buf1), aOrB);
 			reset_pos_b = Latch.kr(pos * BufFrames.kr(buf1), 1 - aOrB);
-			
+			semitones_in_hz = (2 ** (semitones / 12.0));
+
 			jitter_lfo_freq = LinLin.kr(jitter, 0, 1, 0.8, 25); 
 			jitter_lfo_depth = LinLin.kr(jitter, 0, 1, 0.0, 0.1);
 			jitter_lfo = SinOsc.kr(jitter_lfo_freq, 0, jitter_lfo_depth, 1);
-			jitter_rate = BufRateScale.kr(bufnum: buf1) * speed * jitter_lfo;
+			jitter_rate = BufRateScale.kr(bufnum: buf1) * speed * semitones_in_hz * jitter_lfo;
 			
-
 
 			t_buf_pos_a = Phasor.ar(
 				trig: aOrB,
@@ -127,6 +125,7 @@ Engine_MSG : CroneEngine {
 				resetPos: reset_pos_b
 			);
 			
+			pitch = finetune * semitones_in_hz;
 			tremolo = 1 + (density/100 * SinOsc.kr(size*100).range(-1, 1));
 
 			sig = Select.ar(useBufRd, [
@@ -139,13 +138,10 @@ Engine_MSG : CroneEngine {
 					buf_rd_left_b = BufRd.ar(1, buf1, t_buf_pos_b, loop: 1) * tremolo;
 					buf_rd_right_b = BufRd.ar(1, buf2, t_buf_pos_b, loop: 1) * tremolo;
 
-					stereo_sig = [
+					[
 						(crossfade * buf_rd_left_a) + ((1 - crossfade) * buf_rd_left_b),
 						(crossfade * buf_rd_right_a) + ((1 - crossfade) * buf_rd_right_b)
 					];
-					
-					// Apply panning effect
-					Pan2.ar(stereo_sig, spread);
 				}
 			]);
 
@@ -165,7 +161,7 @@ Engine_MSG : CroneEngine {
 				dryAndHighPass,
 			]);
 
-			filtered = Pan2.ar(filtered, pan);
+			stereo_sig = Balance2.ar(filtered[0], filtered[1], pan);
 
 			Out.ar(out, filtered * level * gain);
 			Out.ar(saturation_out, filtered * level * saturation_level);
@@ -175,13 +171,6 @@ Engine_MSG : CroneEngine {
 			Out.kr(phase_out, Select.kr(useBufRd, [pos_sig, Select.kr(aOrB, [t_buf_pos_b, t_buf_pos_a]) / BufFrames.kr(buf1)]));
 			Out.kr(level_out, level);
 		}).add;
-
-
-
-
-
-
-
 
 
 
@@ -441,9 +430,14 @@ Engine_MSG : CroneEngine {
 			voices[voice].set(\density, msg[2]);
 		});
 
-		this.addCommand("pitch", "if", { arg msg;
+		this.addCommand("finetune", "if", { arg msg;
 			var voice = msg[1] - 1;
-			voices[voice].set(\pitch, msg[2]);
+			voices[voice].set(\finetune, msg[2]);
+		});
+
+		this.addCommand("semitones", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\semitones, msg[2]);
 		});
 
 		this.addCommand("filter", "if", { arg msg;
@@ -466,6 +460,10 @@ Engine_MSG : CroneEngine {
 			voices[voice].set(\pan, msg[2]);
 		});
 
+		this.addCommand("fade", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\fade, msg[2]);
+		});
 
 		this.addCommand("envscale", "if", { arg msg;
 			var voice = msg[1] - 1;
