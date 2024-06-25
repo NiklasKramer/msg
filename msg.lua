@@ -2,9 +2,9 @@
 -- Granular sampler with LFO modulation. Requires a grid.
 --
 -- Key Controls:
--- Grid rows 2-8: Trigger and
+-- Grid rows 3-14: Trigger and
 -- control voices.
--- Grid row 1: Record and
+-- Grid row 1+2: Record and
 -- playback patterns.
 -- Encoders: Adjust parameters.
 -- Enc 1: Select voice.
@@ -21,9 +21,11 @@ local grid_device = grid.connect()
 local arc_device = arc.connect()
 
 -- Arc screen mode
-local arc_alt_mode = false
-local regular_params = { "position", "speed", "size", "density" }
-local alt_params = { "volume", "spread", "jitter", "filter" }
+-- local arc_alt_mode = false
+local selected_arc = 1
+local arc1_params = { "position", "speed", "size", "density" }
+local arc2_params = { "semitones", "spread", "jitter", "filter" }
+local arc3_params = { "volume", "saturation", "reverb", "delay" }
 
 -- Voice and control parameters
 local selected_voice = 1
@@ -66,7 +68,7 @@ local blink = 0
 local swell = 0
 local swell_direction = 1
 
--- LFO configuration
+-- MIN/MAX values for parameters
 local min_size = 1
 local max_size = 200
 local min_density = 0
@@ -77,16 +79,23 @@ local min_position = 0
 local max_position = 1
 local min_volume = -60
 local max_volume = 20
+local min_saturation = -60
+local max_saturation = 20
+local min_reverb = -60
+local max_reverb = 20
+local min_delay = -60
+local max_delay = 20
 local min_spread = 0
 local max_spread = 100
 local min_jitter = 0
 local max_jitter = 500
 local min_filter = 0
 local max_filter = 1
+local min_pan = -1
+local max_pan = 1
+local min_semitones = -24
+local max_semitones = 24
 
-
-local previous_regular_params = {}
-local previous_alt_params = {}
 
 local LFO_TARGETS = {
   SIZE = 1,
@@ -96,7 +105,8 @@ local LFO_TARGETS = {
   FILTER = 5,
   VOLUME = 6,
   SPREAD = 7,
-  JITTER = 8
+  JITTER = 8,
+  PAN = 9,
 }
 
 local LFO_TARGET_OPTIONS = {
@@ -107,13 +117,10 @@ local LFO_TARGET_OPTIONS = {
   { "Filter",   LFO_TARGETS.FILTER },
   { "Volume",   LFO_TARGETS.VOLUME },
   { "Spread",   LFO_TARGETS.SPREAD },
-  { "Jitter",   LFO_TARGETS.JITTER }
+  { "Jitter",   LFO_TARGETS.JITTER },
+  { "Pan",      LFO_TARGETS.PAN }
 }
 
-for i = 1, VOICES do
-  previous_regular_params[i] = { nil, nil, nil, nil }
-  previous_alt_params[i] = { nil, nil, nil, nil }
-end
 
 
 function init()
@@ -156,59 +163,41 @@ end
 
 
 local function record_arc_event(n, d)
-  -- Current parameter values
-  local current_regular_params = {
-    params:get(selected_voice .. "position"),
-    params:get(selected_voice .. "speed"),
-    params:get(selected_voice .. "size"),
-    params:get(selected_voice .. "density")
+  local current_arc_params = {
+    {
+      params:get(selected_voice .. "position"),
+      params:get(selected_voice .. "speed"),
+      params:get(selected_voice .. "size"),
+      params:get(selected_voice .. "density") },
+
+    {
+      params:get(selected_voice .. "semitones"),
+      params:get(selected_voice .. "spread"),
+      params:get(selected_voice .. "jitter"),
+      params:get(selected_voice .. "filter") },
+
+    {
+      params:get(selected_voice .. "volume"),
+      params:get(selected_voice .. "saturation"),
+      params:get(selected_voice .. "reverb"),
+      params:get(selected_voice .. "delay") }
   }
 
-  local current_alt_params = {
-    params:get(selected_voice .. "volume"),
-    params:get(selected_voice .. "spread"),
-    params:get(selected_voice .. "jitter"),
-    params:get(selected_voice .. "filter")
-  }
+  local arc_params = { {}, {}, {} }
+  arc_params[selected_arc][n] = current_arc_params[selected_arc][n]
 
-  local regular_params = {}
-  local alt_params = {}
-
-  -- Update the parameters based on the encoder used
-  if n == 1 and arc_alt_mode == false then
-    regular_params[1] = current_regular_params[1] -- position
-  elseif n == 2 and arc_alt_mode == false then
-    regular_params[2] = current_regular_params[2] -- speed
-  elseif n == 3 and arc_alt_mode == false then
-    regular_params[3] = current_regular_params[3] -- size
-  elseif n == 4 and arc_alt_mode == false then
-    regular_params[4] = current_regular_params[4] -- density
-  elseif n == 1 and arc_alt_mode == true then
-    alt_params[1] = current_alt_params[1]         -- volume
-  elseif n == 2 and arc_alt_mode == true then
-    alt_params[2] = current_alt_params[2]         -- spread
-  elseif n == 3 and arc_alt_mode == true then
-    alt_params[3] = current_alt_params[3]         -- jitter
-  elseif n == 4 and arc_alt_mode == true then
-    alt_params[4] = current_alt_params[4]         -- filter
-  end
-
-  -- Record the event
   if record_bank > 0 then
     local current_time = util.time()
-    if record_prevtime < 0 then
-      record_prevtime = current_time
-    end
-
-    local time_delta = current_time - record_prevtime
+    record_prevtime = record_prevtime < 0 and current_time or record_prevtime
 
     if d ~= 0 then
-      table.insert(arc_pattern_banks[record_bank], { time_delta, 'arc', regular_params, alt_params, selected_voice })
+      local time_delta = current_time - record_prevtime
+      table.insert(arc_pattern_banks[record_bank],
+        { time_delta, 'arc', arc_params[1], arc_params[2], arc_params[3], selected_voice })
+      record_prevtime = current_time
     end
-    record_prevtime = current_time
   end
 end
-
 
 
 
@@ -253,27 +242,24 @@ local function stop_recording()
   -- Reset recording state
   record_bank = -1
   record_prevtime = -1
-
-  -- reset all voices
-  -- for v in VOICES do
-  --   previous_regular_params[v] = { nil, nil, nil, nil }
-  --   previous_alt_params[v] = { nil, nil, nil, nil }
-  -- end
 end
 
 
-function playback_arc_event(regular_params, alt_params, voice)
-  -- Regular Params
-  if regular_params[1] ~= nil then params:set(voice .. "position", regular_params[1]) end
-  if regular_params[2] ~= nil then params:set(voice .. "speed", regular_params[2]) end
-  if regular_params[3] ~= nil then params:set(voice .. "size", regular_params[3]) end
-  if regular_params[4] ~= nil then params:set(voice .. "density", regular_params[4]) end
+function playback_arc_event(arc1_params, arc2_params, arc3_params, voice)
+  if arc1_params[1] ~= nil then params:set(voice .. "position", arc1_params[1]) end
+  if arc1_params[2] ~= nil then params:set(voice .. "speed", arc1_params[2]) end
+  if arc1_params[3] ~= nil then params:set(voice .. "size", arc1_params[3]) end
+  if arc1_params[4] ~= nil then params:set(voice .. "density", arc1_params[4]) end
 
-  -- Alt Params
-  if alt_params[1] ~= nil then params:set(voice .. "volume", alt_params[1]) end
-  if alt_params[2] ~= nil then params:set(voice .. "spread", alt_params[2]) end
-  if alt_params[3] ~= nil then params:set(voice .. "jitter", alt_params[3]) end
-  if alt_params[4] ~= nil then params:set(voice .. "filter", alt_params[4]) end
+  if arc2_params[1] ~= nil then params:set(voice .. "semitones", arc2_params[1]) end
+  if arc2_params[2] ~= nil then params:set(voice .. "spread", arc2_params[2]) end
+  if arc2_params[3] ~= nil then params:set(voice .. "jitter", arc2_params[3]) end
+  if arc2_params[4] ~= nil then params:set(voice .. "filter", arc2_params[4]) end
+
+  if arc3_params[1] ~= nil then params:set(voice .. "volume", arc3_params[1]) end
+  if arc3_params[2] ~= nil then params:set(voice .. "saturation", arc3_params[2]) end
+  if arc3_params[3] ~= nil then params:set(voice .. "reverb", arc3_params[3]) end
+  if arc3_params[4] ~= nil then params:set(voice .. "delay", arc3_params[4]) end
 end
 
 local function pattern_next(n)
@@ -284,28 +270,24 @@ local function pattern_next(n)
   local grid_event = grid_bank and grid_bank[pos]
   local arc_event = arc_bank and arc_bank[pos]
 
-  -- Determine which event type is present at the current position
   if grid_event then
     local delta, eventType, x, y, z = table.unpack(grid_event)
-    -- Handle grid event
     if eventType == 'grid' then
       grid_key(x, y, z, true)
     end
   elseif arc_event then
-    local delta, eventType, regular_params, alt_params, voice = table.unpack(arc_event)
-    playback_arc_event(regular_params, alt_params, voice)
+    local delta, eventType, arc1_params, arc2_params, arc3_params, voice = table.unpack(arc_event)
+    if eventType == 'arc' then
+      playback_arc_event(arc1_params, arc2_params, arc3_params, voice)
+    end
   end
 
-
-
-  -- Update pattern position and schedule the next event
   local next_pos = pos + 1
   if next_pos > #grid_bank and next_pos > #arc_bank then
     next_pos = 1
   end
   pattern_positions[n] = next_pos
 
-  -- Find the next delta time, considering both grid and arc banks
   local next_delta = 1
   if grid_bank and grid_bank[next_pos] then
     next_delta = grid_bank[next_pos][1]
@@ -314,6 +296,7 @@ local function pattern_next(n)
   end
   pattern_timers[n]:start(next_delta, 1)
 end
+
 
 
 local function record_handler(n)
@@ -441,8 +424,14 @@ local function grid_refresh()
     grid_ctl:led_level_set(col, row, level)
   end
 
-  if arc_alt_mode then
-    grid_ctl:led_level_set(15, 1, 5)
+
+  -- Arc Screen mode
+  if selected_arc == 1 then
+    grid_ctl:led_level_set(15, 1, 0)
+  elseif selected_arc == 2 then
+    grid_ctl:led_level_set(15, 1, 7)
+  elseif selected_arc == 3 then
+    grid_ctl:led_level_set(15, 1, 15)
   end
 
   -- blink armed pattern
@@ -467,7 +456,6 @@ local function grid_refresh()
   buf:render(grid_device)
   grid_device:refresh()
 end
-
 
 
 function grid_key(x, y, z, skip_record)
@@ -518,7 +506,8 @@ function topbar_key(x, y, z)
       alt = true
     elseif x == 15 and y == 1 then
       -- Toggle arc screen mode
-      arc_alt_mode = not arc_alt_mode
+      selected_arc = selected_arc + 1
+      if selected_arc > 3 then selected_arc = 1 end
     elseif x > 8 and x < 15 then
       -- record handler
       recorder = (x - 8) + 6 * (y - 1)
@@ -683,7 +672,7 @@ function init_params()
   params:set_action('delay_w_depth', function(value) engine.delay_w_depth(value / 100) end)
 
   --delay_rotate
-  params:add_taper('delay_rotate', 'delay_rotate', 0, 1, 0, 0)
+  params:add_taper('delay_rotate', 'delay_rotate', 0, 1, 0.5, 0)
   params:set_action('delay_rotate', function(value) engine.delay_rotate(value) end)
 
   --delay_max_del
@@ -700,39 +689,37 @@ function init_params()
   params:add_taper("reverb_mix", "*" .. sep .. "mix", 0, 100, 100, 0, "%")
   params:set_action("reverb_mix", function(value) engine.reverb_mix(value / 100) end)
 
-  params:add_taper("reverb_time", "*" .. sep .. "time", 0.1, 10, 1, 0, "s")
+  params:add_taper("reverb_time", "*" .. sep .. "time", 0.1, 15, 4, 0, "s")
   params:set_action("reverb_time", function(value) engine.reverb_time(value) end)
 
   params:add_taper("reverb_lpf", "*" .. sep .. "lpf", 20, 20000, 20000, 0, "hz")
   params:set_action("reverb_lpf", function(value) engine.reverb_lpf(value) end)
 
-  params:add_taper("reverb_hpf", "*" .. sep .. "hpf", 20, 20000, 20, 0, "hz")
+  params:add_taper("reverb_hpf", "*" .. sep .. "hpf", 20, 20000, 150, 0, "hz")
   params:set_action("reverb_hpf", function(value) engine.reverb_hpf(value) end)
 
   params:add_taper("reverb_srate", "*" .. sep .. "srate", 0.1, 10, 1, 0, "s")
   params:set_action("reverb_srate", function(value) engine.reverb_srate(value) end)
 
 
-
-
-
-  -- Audio and Granular Parameters
+  -- Voice Parameters
   for v = 1, VOICES do
     params:add_separator("VOICE " .. v)
 
     -- Audio Parameters
-    params:add_group(v .. " AUDIO", 8)
-
+    params:add_group(v .. " AUDIO", 9)
 
     params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
     params:set_action(v .. "filter", function(value) engine.filter(v, value) end)
+
+    params:add_taper(v .. "pan", v .. " pan", -1, 1, 0, 0)
+    params:set_action(v .. "pan", function(value) engine.pan(v, value) end)
 
     params:add_binary(v .. "play_stop", v .. " play/stop", "toggle", 0)
     params:set_action(v .. "play_stop", function(value)
       if value == 1 then start_voice(v, positions[v]) else stop_voice(v) end
     end)
 
-    -- add param to switch between granular and buffer playback
     params:add_binary(v .. "granular", v .. " granular/buffer", "toggle", 0)
     params:set_action(v .. "granular", function(value) engine.useBufRd(v, value) end)
 
@@ -752,16 +739,24 @@ function init_params()
     params:set_action(v .. "reverb", function(value) engine.reverb(v, math.pow(10, value / 20)) end)
 
     -- Granular Parameters
-    params:add_group(v .. " GRANULAR", 7)
+    params:add_group(v .. " GRANULAR", 8)
     params:add {
       type = "control",
-      id = v .. "pitch",
-      name = v .. ": pitch",
+      id = v .. "finetune",
+      name = v .. ": finetune",
       controlspec = controlspec.new(0, 4, "lin", 0.001, 1, "", 0.001),
       action = function(value)
-        engine.pitch(v, value)
+        engine.finetune(v, value)
       end
     }
+
+
+
+
+    params:add_number(v .. "semitones", v .. sep .. "semitones", min_semitones, max_semitones, 0)
+    params:set_action(v .. "semitones", function(value) engine.semitones(v, math.floor(value + 0.5)) end)
+
+
     params:add_taper(v .. "speed", v .. sep .. "speed", min_speed, max_speed, 100, 0, "%")
     params:set_action(v .. "speed", function(value)
       local actual_speed = util.clamp(value, min_speed, max_speed)
@@ -772,7 +767,7 @@ function init_params()
     params:add {
       type = "control",
       id = v .. "position",
-      name = v .. sep .. " Position",
+      name = v .. sep .. "position",
       controlspec = controlspec.new(0, 1, "lin", 0, 0, ""),
       action = function(value)
         local actual_position = util.clamp(value, 0, 1)
@@ -786,15 +781,11 @@ function init_params()
     params:add_taper(v .. "jitter", v .. sep .. "jitter", min_jitter, max_jitter, 0, 5, "ms")
     params:set_action(v .. "jitter", function(value) engine.jitter(v, value / 1000) end)
 
-
     params:add_taper(v .. "size", v .. sep .. "size", min_size, max_size, 100, 5, "ms")
     params:set_action(v .. "size", function(value) engine.size(v, value / 1000) end)
 
     params:add_taper(v .. "density", v .. sep .. "density", min_density, max_density, 20, 6, "hz")
     params:set_action(v .. "density", function(value) engine.density(v, value) end)
-
-
-
 
     params:add_taper(v .. "spread", v .. sep .. "spread", 0, 100, 0, 0, "%")
     params:set_action(v .. "spread", function(value) engine.spread(v, value / 100) end)
@@ -818,7 +809,7 @@ function init_params()
     params:add_binary(v .. "hold", v .. sep .. "hold", "toggle", 1)
 
 
-
+    -- LFO Parameters
     for lfo_num = 1, 4 do
       local lfo_id = v .. "_lfo" .. lfo_num
 
@@ -853,9 +844,6 @@ function init_params()
     end
   end
 
-
-
-
   params:add_separator("")
   params:add_separator('header', 'ARC + General')
 
@@ -863,6 +851,13 @@ function init_params()
   params:add_control("arc_sens_2", "Arc Sensitivity 2", controlspec.new(0.01, 2, 'lin', 0.01, 0.2))
   params:add_control("arc_sens_3", "Arc Sensitivity 3", controlspec.new(0.01, 2, 'lin', 0.01, 0.2))
   params:add_control("arc_sens_4", "Arc Sensitivity 4", controlspec.new(0.01, 2, 'lin', 0.01, 0.2))
+
+
+
+  -- HIDDEN params
+  for v = 1, VOICES do
+    params:add_number(v .. "semitones_precise", v .. sep .. "semitones_precise", min_semitones, max_semitones, 0)
+  end
 end
 
 function add_lfo_target_param(voice, lfo_num)
@@ -879,19 +874,48 @@ function add_lfo_target_param(voice, lfo_num)
 end
 
 -- ARC
-function update_arc_display()
-  if arc_alt_mode then
-    -- Display parameters for arc screen mode
-    local volume = params:get(selected_voice .. "volume")
-    local spread = params:get(selected_voice .. "spread")
-    local jitter = params:get(selected_voice .. "jitter")
-    local filter = params:get(selected_voice .. "filter")
+function arc_enc_update(n, d)
+  if not skip_record then
+    record_arc_event(n, d)
+  end
+  local sensitivity = params:get("arc_sens_" .. n)
+  local adjusted_delta = d * sensitivity
 
-    display_progress_bar(1, volume, -60, max_volume)
-    display_spread_pattern(2, spread, 0, max_spread) -- Update arc for spread
-    display_random_pattern(3, jitter, 0, max_jitter)
-    display_filter_pattern(4, filter, 0, max_filter)
+  local param_name = ''
+  if selected_arc == 1 then
+    param_name = arc1_params[n]
+  elseif selected_arc == 2 then
+    param_name = arc2_params[n]
+  elseif selected_arc == 3 then
+    param_name = arc3_params[n]
   else
+    return
+  end
+
+  -- position is a special case
+  if not param_name then return end
+  local param_id = selected_voice .. param_name
+
+  if param_name == "position" then
+    local newPosition = positions[selected_voice] + (adjusted_delta / 100)
+    newPosition = newPosition % 1
+    positions[selected_voice] = newPosition
+    params:set(param_id, newPosition)
+  elseif param_name == "semitones" then
+    -- local semitones = params:get(param_id)
+    local semitones_precise = params:get(selected_voice .. "semitones_precise")
+    semitones_precise = semitones_precise + adjusted_delta
+    params:set(selected_voice .. "semitones_precise", semitones_precise)
+    params:set(param_id, math.floor(semitones_precise))
+  else
+    params:delta(param_id, adjusted_delta)
+  end
+
+  redraw()
+end
+
+function update_arc_display()
+  if selected_arc == 1 then
     -- Original arc display logic
     local position = positions[selected_voice]
     local speed = params:get(selected_voice .. "speed")
@@ -901,14 +925,32 @@ function update_arc_display()
     local position_angle = scale_angle(position, 1)
     arc_device:segment(1, position_angle, position_angle + 0.2, 15)
 
-    -- Display speed parameter with markers
-    -- Display speed parameter with markers
     display_progress_bar(2, speed, min_speed, max_speed)
     display_percent_markers(2, -100, 0, 100)
-
-
     display_progress_bar(3, size, min_size, max_size)
     display_progress_bar(4, density, min_density, max_density)
+  elseif selected_arc == 2 then
+    -- Display parameters for arc screen mode
+    local semitones = params:get(selected_voice .. "semitones")
+    local spread = params:get(selected_voice .. "spread")
+    local jitter = params:get(selected_voice .. "jitter")
+    local filter = params:get(selected_voice .. "filter")
+
+    display_panning_value(1, semitones, min_semitones, max_semitones)
+    display_spread_pattern(2, spread, 0, max_spread) -- Update arc for spread
+    display_random_pattern(3, jitter, 0, max_jitter)
+    display_filter_pattern(4, filter, 0, max_filter)
+  elseif selected_arc == 3 then
+    -- Display parameters for arc screen mode
+    local volume = params:get(selected_voice .. "volume")
+    local saturation = params:get(selected_voice .. "saturation")
+    local reverb = params:get(selected_voice .. "reverb")
+    local delay = params:get(selected_voice .. "delay")
+
+    display_progress_bar(1, volume, min_volume, max_volume)
+    display_progress_bar(2, saturation, min_saturation, max_saturation)
+    display_progress_bar(3, reverb, min_reverb, max_reverb)
+    display_progress_bar(4, delay, min_delay, max_delay)
   end
 
   arc_device:refresh()
@@ -1075,6 +1117,32 @@ function display_exponential_pattern(encoder, value, min, max)
   end
 end
 
+function display_panning_value(encoder, value, min, max)
+  local total_leds = 64
+  local center_led = math.floor(total_leds / 2) + 1
+  local range = max - min
+  local normalized_value = (value - min) / range
+  local led_position = math.floor((normalized_value - 0.5) * total_leds / 3) + center_led
+
+  -- Clear all LEDs first
+  for led = 1, total_leds do
+    arc_device:led(encoder, led, 0)
+  end
+
+  -- Light up LEDs based on the value
+  if value < 0 then
+    for led = center_led, led_position, -1 do
+      arc_device:led(encoder, led, 15)
+    end
+  elseif value > 0 then
+    for led = center_led, led_position do
+      arc_device:led(encoder, led, 15)
+    end
+  else
+    arc_device:led(encoder, center_led, 15)
+  end
+end
+
 function normalize_param_value(value, min, max)
   local range = max - min
   return math.floor(((value - min) / range) * 64)
@@ -1086,37 +1154,6 @@ function scale_angle(value, scale)
     angle = angle - 0.0001                 -- Subtract a tiny value to avoid reaching 2 * pi
   end
   return angle
-end
-
-function arc_enc_update(n, d)
-  if not skip_record then
-    record_arc_event(n, d)
-  end
-  local sensitivity = params:get("arc_sens_" .. n)
-  local adjusted_delta = d * sensitivity
-  local snap_threshold = 1
-
-  local param_name = arc_alt_mode and alt_params[n] or regular_params[n]
-  if not param_name then return end
-
-  local param_id = selected_voice .. param_name
-
-  if n == 2 then
-    local new_value = params:get(param_id) + adjusted_delta
-    if math.abs(new_value) < snap_threshold then
-      new_value = 0
-    end
-    params:set(param_id, new_value)
-  elseif param_name == "position" then
-    local newPosition = positions[selected_voice] + (adjusted_delta / 100)
-    newPosition = newPosition % 1
-    positions[selected_voice] = newPosition
-    params:set(param_id, newPosition)
-  else
-    params:delta(param_id, adjusted_delta)
-  end
-
-  redraw()
 end
 
 -- ENCODERS AND KEYS
@@ -1301,6 +1338,9 @@ function update_lfo_ranges()
       elseif target == LFO_TARGETS.JITTER then
         lfos[v][lfo_num]:set('min', min_jitter)
         lfos[v][lfo_num]:set('max', max_jitter)
+      elseif target == LFO_TARGETS.PAN then
+        lfos[v][lfo_num]:set('min', min_pan)
+        lfos[v][lfo_num]:set('max', max_pan)
       end
     end
   end
@@ -1326,6 +1366,8 @@ function lfo_action(voice, lfo_num, scaled)
     params:set(voice .. "spread", scaled)
   elseif target == LFO_TARGETS.JITTER then
     params:set(voice .. "jitter", scaled)
+  elseif target == LFO_TARGETS.PAN then
+    params:set(voice .. "pan", scaled)
   end
 end
 
