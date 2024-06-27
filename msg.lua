@@ -13,6 +13,7 @@
 -- Key 3: Change screen.
 
 -- Engine and device connections
+
 engine.name = 'MSG'
 local LFO = require 'lfo'
 local lfos = {}
@@ -24,13 +25,14 @@ local arc_device = arc.connect()
 -- local arc_alt_mode = false
 local selected_arc = 1
 local arc1_params = { "position", "speed", "size", "density" }
-local arc2_params = { "semitones", "spread", "jitter", "filter" }
-local arc3_params = { "volume", "saturation", "reverb", "delay" }
+local arc2_params = { "volume", "spread", "jitter", "filter" }
+local arc3_params = { "filterbank", "saturation", "reverb", "delay" }
+local_arc_params = { arc1_params, arc2_params, arc3_params }
 
 -- Voice and control parameters
 local selected_voice = 1
-local VOICES = 12
-local RECORDER = 12
+local VOICES = 10
+local RECORDER = 16
 local current_screen = 1
 
 -- Voice state tracking
@@ -73,12 +75,14 @@ local min_size = 1
 local max_size = 200
 local min_density = 0
 local max_density = 200
-local min_speed = -200
-local max_speed = 200
+local min_speed = -400
+local max_speed = 400
 local min_position = 0
 local max_position = 1
 local min_volume = -60
 local max_volume = 20
+local min_filterbank = -60
+local max_filterbank = 20
 local min_saturation = -60
 local max_saturation = 20
 local min_reverb = -60
@@ -93,8 +97,8 @@ local min_filter = 0
 local max_filter = 1
 local min_pan = -1
 local max_pan = 1
-local min_semitones = -24
-local max_semitones = 24
+local min_semitones = -7
+local max_semitones = 7
 
 
 local LFO_TARGETS = {
@@ -132,6 +136,12 @@ function init()
   setup_lfos()
   update_lfo_ranges()
 
+  for i = 1, RECORDER do
+    local grid_pattern_serialized = params:get("pattern_" .. i .. "_grid")
+    local arc_pattern_serialized = params:get("pattern_" .. i .. "_arc")
+    load_pattern_from_param(i, grid_pattern_serialized, arc_pattern_serialized)
+  end
+
   params:bang()
 end
 
@@ -165,22 +175,22 @@ end
 local function record_arc_event(n, d)
   local current_arc_params = {
     {
-      params:get(selected_voice .. "position"),
-      params:get(selected_voice .. "speed"),
-      params:get(selected_voice .. "size"),
-      params:get(selected_voice .. "density") },
+      params:get(selected_voice .. arc1_params[1]),
+      params:get(selected_voice .. arc1_params[2]),
+      params:get(selected_voice .. arc1_params[3]),
+      params:get(selected_voice .. arc1_params[4]) },
 
     {
-      params:get(selected_voice .. "semitones"),
-      params:get(selected_voice .. "spread"),
-      params:get(selected_voice .. "jitter"),
-      params:get(selected_voice .. "filter") },
+      params:get(selected_voice .. arc2_params[1]),
+      params:get(selected_voice .. arc2_params[2]),
+      params:get(selected_voice .. arc2_params[3]),
+      params:get(selected_voice .. arc2_params[4]) },
 
     {
-      params:get(selected_voice .. "volume"),
-      params:get(selected_voice .. "saturation"),
-      params:get(selected_voice .. "reverb"),
-      params:get(selected_voice .. "delay") }
+      params:get(selected_voice .. arc3_params[1]),
+      params:get(selected_voice .. arc3_params[2]),
+      params:get(selected_voice .. arc3_params[3]),
+      params:get(selected_voice .. arc3_params[4]) }
   }
 
   local arc_params = { {}, {}, {} }
@@ -239,6 +249,9 @@ local function stop_recording()
     update_delta_and_start_playback(arc_pattern_banks, current_time)
   end
 
+  -- Save the updated patterns to params
+  save_patterns_to_params()
+
   -- Reset recording state
   record_bank = -1
   record_prevtime = -1
@@ -251,12 +264,12 @@ function playback_arc_event(arc1_params, arc2_params, arc3_params, voice)
   if arc1_params[3] ~= nil then params:set(voice .. "size", arc1_params[3]) end
   if arc1_params[4] ~= nil then params:set(voice .. "density", arc1_params[4]) end
 
-  if arc2_params[1] ~= nil then params:set(voice .. "semitones", arc2_params[1]) end
+  if arc2_params[1] ~= nil then params:set(voice .. "volume", arc2_params[1]) end
   if arc2_params[2] ~= nil then params:set(voice .. "spread", arc2_params[2]) end
   if arc2_params[3] ~= nil then params:set(voice .. "jitter", arc2_params[3]) end
   if arc2_params[4] ~= nil then params:set(voice .. "filter", arc2_params[4]) end
 
-  if arc3_params[1] ~= nil then params:set(voice .. "volume", arc3_params[1]) end
+  if arc3_params[1] ~= nil then params:set(voice .. "filterbank", arc3_params[1]) end
   if arc3_params[2] ~= nil then params:set(voice .. "saturation", arc3_params[2]) end
   if arc3_params[3] ~= nil then params:set(voice .. "reverb", arc3_params[3]) end
   if arc3_params[4] ~= nil then params:set(voice .. "delay", arc3_params[4]) end
@@ -306,6 +319,7 @@ local function record_handler(n)
     if pattern_timers[n].is_running then stop_playback(n) end
     grid_pattern_banks[n] = {}
     arc_pattern_banks[n] = {}
+    params:set("pattern_" .. n, "{}")
     do return end
   end
 
@@ -376,7 +390,7 @@ local function stop_voice(voice)
   arc_dirty = true
 end
 
-local function grid_refresh()
+function grid_refresh()
   if grid_device == nil then
     return
   end
@@ -398,10 +412,10 @@ local function grid_refresh()
       voice_level = math.floor(swell) -- Apply swell effect when any voice is playing
     end
 
-    if i <= 6 then
+    if i <= 5 then
       grid_ctl:led_level_set(i, 1, voice_level)
     else
-      grid_ctl:led_level_set(i - 6, 2, voice_level)
+      grid_ctl:led_level_set(i - 5, 2, voice_level)
     end
   end
 
@@ -419,11 +433,10 @@ local function grid_refresh()
       end
     end
 
-    local row = (i <= 6) and 1 or 2 -- Place first 6 in the first row, next 6 in the second row
-    local col = ((i - 1) % 6) + 9   -- Place recorders in columns 9 to 14
+    local row = (i <= 8) and 1 or 2 -- Place first 8 in the first row, next 8 in the second row
+    local col = ((i - 1) % 8) + 7   -- Place recorders in columns 7 to 14
     grid_ctl:led_level_set(col, row, level)
   end
-
 
   -- Arc Screen mode
   if selected_arc == 1 then
@@ -436,8 +449,8 @@ local function grid_refresh()
 
   -- blink armed pattern
   if record_bank > 0 then
-    local row = (record_bank <= 6) and 1 or 2
-    local col = ((record_bank - 1) % 6) + 9
+    local row = (record_bank <= 8) and 1 or 2
+    local col = ((record_bank - 1) % 8) + 7
     grid_ctl:led_level_set(col, row, 10 * blink)
   end
 
@@ -452,50 +465,129 @@ local function grid_refresh()
     end
   end
 
+  -- Semitones display on the last row (row 16)
+  local semitones = params:get(selected_voice .. "semitones")
+  for col = 1, 16 do
+    local level = 1 -- Default dim lighting
+
+    -- Highlight the center (semitones = 0) at positions 8 and 9
+    if col == 8 or col == 9 then
+      level = 8
+    end
+    grid_ctl:led_level_set(col, 16, level)
+  end
+  if semitones < 0 and semitones > -8 then
+    grid_ctl:led_level_set(semitones + 8, 16, 15)
+  elseif semitones > 0 and semitones < 8 then
+    grid_ctl:led_level_set(semitones + 9, 16, 15)
+  elseif semitones == 0 then
+    grid_ctl:led_level_set(8, 16, 15)
+    grid_ctl:led_level_set(9, 16, 15)
+  end
+
+  -- Speed display on the second last row (row 15)
+  local speed = params:get(selected_voice .. "speed")
+  for col = 4, 13 do
+    local level = 1 -- Default dim lighting
+
+    -- Highlight the center (speed = 0) at positions 8 and 9
+    if col == 8 or col == 9 then
+      level = 0
+    end
+    grid_ctl:led_level_set(col, 15, level)
+  end
+  if speed < 0 then
+    grid_ctl:led_level_set(8 + math.floor(speed / 100), 15, 15)
+  elseif speed > 0 then
+    grid_ctl:led_level_set(9 + math.floor(speed / 100), 15, 15)
+  else
+    grid_ctl:led_level_set(8, 15, 15)
+    grid_ctl:led_level_set(9, 15, 15)
+  end
+
+  -- Display toggles for hold and granular on row 15
+  local hold = params:get(selected_voice .. "hold")
+  local granular = params:get(selected_voice .. "granular")
+  grid_ctl:led_level_set(1, 15, hold == 1 and 10 or 1)
+  grid_ctl:led_level_set(2, 15, granular == 1 and 10 or 1)
+
   local buf = grid_ctl | grid_voc
   buf:render(grid_device)
   grid_device:refresh()
 end
 
-
 function grid_key(x, y, z, skip_record)
-  if y > 1 or (y == 1 and x < 9) then
-    if not skip_record then
-      record_grid_event(x, y, z)
-    end
+  -- Record grid events if necessary
+  if (y > 2 and y < 15) and not skip_record then
+    record_grid_event(x, y, z)
   end
 
   if z == 1 then
-    if y > 2 then
+    if y > 2 and y < 15 then
+      -- Handle voice triggering and positioning
       local voice = y - 2
       local new_position = (x - 1) / 16
 
       if alt and gates[voice] > 0 then
-        -- Stop playback of the track if alt is pressed and the track is playing
+        -- Stop playback if alt is pressed and the track is playing
         stop_voice(voice)
       else
         -- Start voice with new position
         positions[voice] = new_position
         params:set(voice .. "position", new_position)
-        if params:get(voice .. "hold") == 0 then
-          start_voice(voice)
+        start_voice(voice)
+      end
+    elseif y == 16 then
+      -- Handle semitone changes on the last row
+      local semitone_value
+      if x > 9 then
+        semitone_value = x - 9
+      elseif x == 9 or x == 8 then
+        semitone_value = 0
+      else
+        semitone_value = x - 8
+      end
+      params:set(selected_voice .. "semitones", semitone_value)
+    elseif y == 15 then
+      -- Handle speed changes on the second last row
+      if x == 1 then
+        -- Toggle hold on/off
+        local hold = params:get(selected_voice .. "hold")
+        params:set(selected_voice .. "hold", hold == 0 and 1 or 0)
+      elseif x == 2 then
+        -- Toggle between buffer and granular mode
+        local granular = params:get(selected_voice .. "granular")
+        params:set(selected_voice .. "granular", granular == 0 and 1 or 0)
+      else
+        -- Handle speed changes on the second last row
+        local speed_value
+        if x > 9 then
+          speed_value = (x - 9) * 100
+        elseif x == 9 or x == 8 then
+          speed_value = 0
         else
-          start_voice(voice)
+          speed_value = (x - 8) * 100
         end
+        params:set(selected_voice .. "speed", speed_value)
       end
     else
       topbar_key(x, y, z)
     end
   else
-    if y > 2 then
+    if y > 2 and y < 15 then
+      -- Stop voice if hold is not active
       local voice = y - 2
       if params:get(voice .. "hold") == 0 then
         stop_voice(voice)
       end
     end
-    -- release alt
-    if x == 16 and y == 1 then alt = false end
+
+    -- Release alt if necessary
+    if x == 16 and y == 1 then
+      alt = false
+    end
   end
+
   redraw()
 end
 
@@ -508,21 +600,19 @@ function topbar_key(x, y, z)
       -- Toggle arc screen mode
       selected_arc = selected_arc + 1
       if selected_arc > 3 then selected_arc = 1 end
-    elseif x > 8 and x < 15 then
+    elseif x >= 7 and x <= 14 then
       -- record handler
-      recorder = (x - 8) + 6 * (y - 1)
+      local recorder = (x - 7) + 8 * (y - 1) + 1
       record_handler(recorder)
-    elseif x == 8 then
-      -- reserved
-    elseif x < 7 then
+    elseif x <= 5 then
       -- stop, only if alt is not pressed
       if alt then
-        local voice = x + 6 * (y - 1)
+        local voice = x + 5 * (y - 1)
         --toggle hold for voice
         local hold = params:get(voice .. "hold")
         params:set(voice .. "hold", hold == 0 and 1 or 0)
       else
-        selected_voice = x + 6 * (y - 1)
+        selected_voice = x + 5 * (y - 1)
       end
     end
   end
@@ -575,15 +665,15 @@ function init_metros()
       swell = 3
       swell_direction = 1
     end
-  end, 1 / 40)
+  end, 1 / 30)
   metro_swell:start()
 
-  local metro_redraw = metro.init(function(stage) redraw() end, 1 / 15)
+  local metro_redraw = metro.init(function(stage) redraw() end, 1 / 5)
   metro_redraw:start()
 
   local metro_arc_update = metro.init(function(stage)
     update_arc_display()
-  end, 1 / 40)
+  end, 1 / 30)
   metro_arc_update:start()
 end
 
@@ -702,12 +792,52 @@ function init_params()
   params:set_action("reverb_srate", function(value) engine.reverb_srate(value) end)
 
 
+
+  -- Group for Filterbank Parameters
+  params:add_group("FILTERBANK", 11)
+
+  -- Filterbank Parameters
+  params:add_taper("filterbank_amp", "*" .. sep .. "amp", 0, 1, 1, 0, "")
+  params:set_action("filterbank_amp", function(value) engine.filterbank_amp(value) end)
+
+  params:add_taper("filterbank_gate", "*" .. sep .. "gate", 0, 1, 1, 0, "")
+  params:set_action("filterbank_gate", function(value) engine.filterbank_gate(value) end)
+
+  params:add_taper("filterbank_spread", "*" .. sep .. "spread", 0, 1, 1, 0, "")
+  params:set_action("filterbank_spread", function(value) engine.filterbank_spread(value) end)
+
+  params:add_taper("filterbank_q", "*" .. sep .. "q", 0.0001, 1, 0.1, 0, "")
+  params:set_action("filterbank_q", function(value) engine.filterbank_q(value) end)
+
+  params:add_taper("filterbank_modRate", "*" .. sep .. "modRate", 0.1, 10, 0.2, 0, "")
+  params:set_action("filterbank_modRate", function(value) engine.filterbank_modRate(value) end)
+
+  params:add_taper("filterbank_depth", "*" .. sep .. "depth", 0, 1, 0.5, 0, "")
+  params:set_action("filterbank_depth", function(value) engine.filterbank_depth(value) end)
+
+  params:add_taper("filterbank_qModRate", "*" .. sep .. "qModRate", 0.1, 10, 0.1, 0, "")
+  params:set_action("filterbank_qModRate", function(value) engine.filterbank_qModRate(value) end)
+
+  params:add_taper("filterbank_qModDepth", "*" .. sep .. "qModDepth", 0, 1, 0.01, 0, "")
+  params:set_action("filterbank_qModDepth", function(value) engine.filterbank_qModDepth(value) end)
+
+  params:add_taper("filterbank_panModRate", "*" .. sep .. "panModRate", 0.1, 10, 0.4, 0, "")
+  params:set_action("filterbank_panModRate", function(value) engine.filterbank_panModRate(value) end)
+
+  params:add_taper("filterbank_panModDepth", "*" .. sep .. "panModDepth", 0, 1, 1, 0, "")
+  params:set_action("filterbank_panModDepth", function(value) engine.filterbank_panModDepth(value) end)
+
+  params:add_taper("filterbank_wet", "*" .. sep .. "wet", 0, 1, 1, 0, "")
+  params:set_action("filterbank_wet", function(value) engine.filterbank_wet(value) end)
+
+
+
   -- Voice Parameters
   for v = 1, VOICES do
     params:add_separator("VOICE " .. v)
 
     -- Audio Parameters
-    params:add_group(v .. " AUDIO", 9)
+    params:add_group(v .. " AUDIO", 10)
 
     params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
     params:set_action(v .. "filter", function(value) engine.filter(v, value) end)
@@ -737,6 +867,9 @@ function init_params()
 
     params:add_taper(v .. "reverb", v .. " reverb", -60, 20, -60, 0, "dB")
     params:set_action(v .. "reverb", function(value) engine.reverb(v, math.pow(10, value / 20)) end)
+
+    params:add_taper(v .. "filterbank", v .. " filterbank", -60, 20, -60, 0, "dB")
+    params:set_action(v .. "filterbank", function(value) engine.filterbank(v, math.pow(10, value / 20)) end)
 
     -- Granular Parameters
     params:add_group(v .. " GRANULAR", 8)
@@ -857,6 +990,20 @@ function init_params()
   -- HIDDEN params
   for v = 1, VOICES do
     params:add_number(v .. "semitones_precise", v .. sep .. "semitones_precise", min_semitones, max_semitones, 0)
+    params:hide(v .. "semitones_precise")
+  end
+
+  for i = 1, RECORDER do
+    params:add_text("pattern_" .. i .. "_grid", "Pattern " .. i .. " Grid", "")
+    params:hide("pattern_" .. i .. "_grid")
+    params:add_text("pattern_" .. i .. "_arc", "Pattern " .. i .. " Arc", "")
+    params:hide("pattern_" .. i .. "_arc")
+    params:set_action("pattern_" .. i .. "_grid", function(value)
+      load_pattern_from_param(i, value, params:get("pattern_" .. i .. "_arc"))
+    end)
+    params:set_action("pattern_" .. i .. "_arc", function(value)
+      load_pattern_from_param(i, params:get("pattern_" .. i .. "_grid"), value)
+    end)
   end
 end
 
@@ -931,23 +1078,23 @@ function update_arc_display()
     display_progress_bar(4, density, min_density, max_density)
   elseif selected_arc == 2 then
     -- Display parameters for arc screen mode
-    local semitones = params:get(selected_voice .. "semitones")
+    local volume = params:get(selected_voice .. "volume")
     local spread = params:get(selected_voice .. "spread")
     local jitter = params:get(selected_voice .. "jitter")
     local filter = params:get(selected_voice .. "filter")
 
-    display_panning_value(1, semitones, min_semitones, max_semitones)
+    display_progress_bar(1, volume, min_volume, max_volume)
     display_spread_pattern(2, spread, 0, max_spread) -- Update arc for spread
     display_random_pattern(3, jitter, 0, max_jitter)
     display_filter_pattern(4, filter, 0, max_filter)
   elseif selected_arc == 3 then
     -- Display parameters for arc screen mode
-    local volume = params:get(selected_voice .. "volume")
+    local filterbank = params:get(selected_voice .. "filterbank")
     local saturation = params:get(selected_voice .. "saturation")
     local reverb = params:get(selected_voice .. "reverb")
     local delay = params:get(selected_voice .. "delay")
 
-    display_progress_bar(1, volume, min_volume, max_volume)
+    display_progress_bar(1, filterbank, min_filterbank, max_filterbank)
     display_progress_bar(2, saturation, min_saturation, max_saturation)
     display_progress_bar(3, reverb, min_reverb, max_reverb)
     display_progress_bar(4, delay, min_delay, max_delay)
@@ -1375,4 +1522,56 @@ function cleanup()
   for v = 1, VOICES do
     lfos[v]:stop()
   end
+end
+
+-- Function to save patterns to params
+function save_patterns_to_params()
+  for i = 1, RECORDER do
+    local grid_pattern_serialized = serialize_table(grid_pattern_banks[i])
+    local arc_pattern_serialized = serialize_table(arc_pattern_banks[i])
+    params:set("pattern_" .. i .. "_grid", grid_pattern_serialized)
+    params:set("pattern_" .. i .. "_arc", arc_pattern_serialized)
+  end
+end
+
+-- Function to load patterns from params
+function load_pattern_from_param(n, grid_serialized, arc_serialized)
+  if grid_serialized ~= "" then
+    grid_pattern_banks[n] = deserialize_table(grid_serialized)
+  else
+    grid_pattern_banks[n] = {}
+  end
+
+  if arc_serialized ~= "" then
+    arc_pattern_banks[n] = deserialize_table(arc_serialized)
+  else
+    arc_pattern_banks[n] = {}
+  end
+end
+
+-- Table Serializer/Deserializer
+function deserialize_table(serialized)
+  local func = load("return " .. serialized)
+  return func and func() or {}
+end
+
+function serialize_table(t)
+  local serialized = "{"
+  for key, value in pairs(t) do
+    serialized = serialized .. "[" .. tostring(key) .. "]="
+
+    if type(value) == "table" then
+      serialized = serialized .. serialize_table(value)
+    elseif type(value) == "number" then
+      serialized = serialized .. value
+    elseif type(value) == "string" then
+      serialized = serialized .. "\"" .. value .. "\""
+    elseif type(value) == "boolean" then
+      serialized = serialized .. tostring(value)
+    end
+
+    serialized = serialized .. ","
+  end
+  serialized = serialized .. "}"
+  return serialized
 end
