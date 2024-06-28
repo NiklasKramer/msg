@@ -33,6 +33,7 @@ local_arc_params = { arc1_params, arc2_params, arc3_params }
 local selected_voice = 1
 local VOICES = 10
 local RECORDER = 16
+local STATES = 16
 local current_screen = 1
 
 -- Voice state tracking
@@ -102,7 +103,7 @@ local max_semitones = 7
 
 --state
 local state_led_levels = {}
-for i = 1, 16 do
+for i = 1, STATES do
   state_led_levels[i] = 0
 end
 
@@ -331,7 +332,7 @@ local function handle_state_grid(x, z)
       else
         -- Load state
         load_state(x)
-        for i = 1, 16 do
+        for i = 1, STATES do
           if i == x then
             state_led_levels[i] = 15
           elseif params:get("state_" .. i) ~= "" then
@@ -545,7 +546,7 @@ function grid_refresh()
   grid_ctl:led_level_set(2, 15, granular == 1 and 10 or 1)
 
   -- State LEDs on row 14
-  for i = 1, 16 do
+  for i = 1, STATES do
     grid_ctl:led_level_set(i, 14, state_led_levels[i])
   end
 
