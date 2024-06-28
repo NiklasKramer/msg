@@ -100,6 +100,12 @@ local max_pan = 1
 local min_semitones = -7
 local max_semitones = 7
 
+--state
+local state_led_levels = {}
+for i = 1, 16 do
+  state_led_levels[i] = 0
+end
+
 
 local LFO_TARGETS = {
   SIZE = 1,
@@ -310,7 +316,34 @@ local function pattern_next(n)
   pattern_timers[n]:start(next_delta, 1)
 end
 
-
+local function handle_state_grid(x, z)
+  if z == 1 then
+    if alt then
+      -- Clear state if alt is pressed
+      params:set("state_" .. x, "")
+      state_led_levels[x] = 0
+    else
+      local state_serialized = params:get("state_" .. x)
+      if state_serialized == "" then
+        -- Save state
+        save_state(x)
+        state_led_levels[x] = 5
+      else
+        -- Load state
+        load_state(x)
+        for i = 1, 16 do
+          if i == x then
+            state_led_levels[i] = 15
+          elseif params:get("state_" .. i) ~= "" then
+            state_led_levels[i] = 5
+          else
+            state_led_levels[i] = 0
+          end
+        end
+      end
+    end
+  end
+end
 
 local function record_handler(n)
   if alt then
@@ -511,6 +544,11 @@ function grid_refresh()
   grid_ctl:led_level_set(1, 15, hold == 1 and 10 or 1)
   grid_ctl:led_level_set(2, 15, granular == 1 and 10 or 1)
 
+  -- State LEDs on row 14
+  for i = 1, 16 do
+    grid_ctl:led_level_set(i, 14, state_led_levels[i])
+  end
+
   local buf = grid_ctl | grid_voc
   buf:render(grid_device)
   grid_device:refresh()
@@ -522,7 +560,9 @@ function grid_key(x, y, z, skip_record)
     record_grid_event(x, y, z)
   end
 
-  if z == 1 then
+  if y == 14 then
+    handle_state_grid(x, z)
+  elseif z == 1 then
     if y > 2 and y < 15 then
       -- Handle voice triggering and positioning
       local voice = y - 2
@@ -595,7 +635,7 @@ function topbar_key(x, y, z)
   if y == 1 or y == 2 then
     if x == 16 and y == 1 then
       -- alt
-      alt = true
+      alt = z == 1
     elseif x == 15 and y == 1 then
       -- Toggle arc screen mode
       selected_arc = selected_arc + 1
@@ -615,11 +655,6 @@ function topbar_key(x, y, z)
         selected_voice = x + 5 * (y - 1)
       end
     end
-  end
-
-  if z == 0 then
-    -- release alt
-    if x == 16 and y == 1 then alt = false end
   end
 end
 
@@ -1004,6 +1039,12 @@ function init_params()
     params:set_action("pattern_" .. i .. "_arc", function(value)
       load_pattern_from_param(i, params:get("pattern_" .. i .. "_grid"), value)
     end)
+  end
+
+
+  for state = 1, 16 do
+    params:add_text("state_" .. state, "State " .. state, "")
+    params:hide("state_" .. state)
   end
 end
 
@@ -1549,16 +1590,56 @@ function load_pattern_from_param(n, grid_serialized, arc_serialized)
   end
 end
 
+-- Function to save a state
+function save_state(state)
+  local state_table = {}
+  for voice = 1, VOICES do
+    state_table[voice] = gather_voice_params(voice)
+  end
+  local serialized = serialize_table(state_table)
+  params:set("state_" .. state, serialized)
+end
+
+-- Function to load a state
+function load_state(state)
+  local serialized = params:get("state_" .. state)
+  if serialized ~= "" then
+    local state_table = deserialize_table(serialized)
+    if state_table then
+      for voice = 1, VOICES do
+        set_voice_params(voice, state_table[voice])
+      end
+
+
+      grid_refresh() -- Call grid_refresh to update the grid after loading the state
+    end
+  end
+end
+
 -- Table Serializer/Deserializer
 function deserialize_table(serialized)
-  local func = load("return " .. serialized)
-  return func and func() or {}
+  print("Deserializing: " .. serialized)
+  local func, err = load("return " .. serialized)
+  if func then
+    local success, result = pcall(func)
+    if success then
+      return result
+    else
+      error("Error deserializing table: " .. result)
+    end
+  else
+    error("Error loading serialized string: " .. err)
+  end
 end
 
 function serialize_table(t)
   local serialized = "{"
   for key, value in pairs(t) do
-    serialized = serialized .. "[" .. tostring(key) .. "]="
+    if type(key) == "number" then
+      serialized = serialized .. "[" .. tostring(key) .. "]="
+    else
+      serialized = serialized .. "['" .. tostring(key) .. "']="
+    end
 
     if type(value) == "table" then
       serialized = serialized .. serialize_table(value)
@@ -1574,4 +1655,59 @@ function serialize_table(t)
   end
   serialized = serialized .. "}"
   return serialized
+end
+
+function gather_voice_params(voice)
+  return {
+    sample = params:get(voice .. "sample"),
+    filter = params:get(voice .. "filter"),
+    pan = params:get(voice .. "pan"),
+    play_stop = params:get(voice .. "play_stop"),
+    granular = params:get(voice .. "granular"),
+    volume = params:get(voice .. "volume"),
+    saturation = params:get(voice .. "saturation"),
+    delay = params:get(voice .. "delay"),
+    reverb = params:get(voice .. "reverb"),
+    filterbank = params:get(voice .. "filterbank"),
+    finetune = params:get(voice .. "finetune"),
+    semitones = params:get(voice .. "semitones"),
+    speed = params:get(voice .. "speed"),
+    -- position = params:get(voice .. "position"),
+    jitter = params:get(voice .. "jitter"),
+    size = params:get(voice .. "size"),
+    density = params:get(voice .. "density"),
+    spread = params:get(voice .. "spread"),
+    fade = params:get(voice .. "fade"),
+    attack = params:get(voice .. "attack"),
+    sustain = params:get(voice .. "sustain"),
+    release = params:get(voice .. "release"),
+    hold = params:get(voice .. "hold")
+  }
+end
+
+-- Function to set all voice parameters from a table
+function set_voice_params(voice, params_table)
+  params:set(voice .. "sample", params_table.sample)
+  params:set(voice .. "filter", params_table.filter)
+  params:set(voice .. "pan", params_table.pan)
+  params:set(voice .. "play_stop", params_table.play_stop)
+  params:set(voice .. "granular", params_table.granular)
+  params:set(voice .. "volume", params_table.volume)
+  params:set(voice .. "saturation", params_table.saturation)
+  params:set(voice .. "delay", params_table.delay)
+  params:set(voice .. "reverb", params_table.reverb)
+  params:set(voice .. "filterbank", params_table.filterbank)
+  params:set(voice .. "finetune", params_table.finetune)
+  params:set(voice .. "semitones", params_table.semitones)
+  params:set(voice .. "speed", params_table.speed)
+  -- params:set(voice .. "position", params_table.position)
+  params:set(voice .. "jitter", params_table.jitter)
+  params:set(voice .. "size", params_table.size)
+  params:set(voice .. "density", params_table.density)
+  params:set(voice .. "spread", params_table.spread)
+  params:set(voice .. "fade", params_table.fade)
+  params:set(voice .. "attack", params_table.attack)
+  params:set(voice .. "sustain", params_table.sustain)
+  params:set(voice .. "release", params_table.release)
+  params:set(voice .. "hold", params_table.hold)
 end
