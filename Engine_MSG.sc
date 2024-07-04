@@ -89,13 +89,13 @@ Engine_MSG : CroneEngine {
 			gate=0, pos=0, speed=1, jitter=0, fade=0.5,
 			size=0.1, density=20, finetune=1, semitones=0, spread=0, 
 			gain=1, envscale=1, attack=1, sustain=1, release=1,
-			freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1;
+			freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1, mute=1, fadeTime=0.1;
 			
 			var grain_trig, jitter_sig, buf_dur, pan_sig, buf_pos, pos_sig, sig, t_buf_pos_a, t_buf_pos_b, t_pos_sig;
 			var env, level, filtered, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, tremolo;
 			var buf_rd_left_a, buf_rd_right_a, buf_rd_left_b, buf_rd_right_b, aOrB, crossfade, reset_pos_a, reset_pos_b;
-			var jitter_lfo_freq, jitter_lfo_depth, jitter_lfo, jitter_rate, stereo_sig, pitch, semitones_in_hz;
-
+			var jitter_lfo_freq, jitter_lfo_depth, jitter_lfo, jitter_rate, stereo_sig, pitch, semitones_in_hz, smooth_mute;
+			
 			grain_trig = Impulse.kr(density);
 			buf_dur = BufDur.kr(buf1);
 			pan_sig = TRand.kr(trig: grain_trig, lo: spread.neg, hi: spread);
@@ -103,6 +103,8 @@ Engine_MSG : CroneEngine {
 			buf_pos = Phasor.kr(trig: t_reset_pos, rate: buf_dur.reciprocal / ControlRate.ir * speed, resetPos: pos);
 			pos_sig = Wrap.kr(Select.kr(freeze, [buf_pos, pos]));
 
+			// Apply fade time to mute control
+			smooth_mute = Lag.kr(mute, fadeTime);
 
 			// bufrd only
 			aOrB = ToggleFF.kr(t_reset_pos);
@@ -115,7 +117,6 @@ Engine_MSG : CroneEngine {
 			jitter_lfo_depth = LinLin.kr(jitter, 0, 1, 0.0, 0.1);
 			jitter_lfo = SinOsc.kr(jitter_lfo_freq, 0, jitter_lfo_depth, 1);
 			jitter_rate = BufRateScale.kr(bufnum: buf1) * speed * semitones_in_hz * jitter_lfo;
-			
 
 			t_buf_pos_a = Phasor.ar(
 				trig: aOrB,
@@ -171,15 +172,15 @@ Engine_MSG : CroneEngine {
 
 			stereo_sig = Balance2.ar(filtered[0], filtered[1], pan);
 
-			Out.ar(out, filtered * level * gain);
-			Out.ar(saturation_out, filtered * level * saturation_level);
-			Out.ar(delay_out, filtered * level * delay_level);
-			Out.ar(reverb_out, filtered * level * reverb_level);
-			Out.ar(filterbank_out, filtered * level * filterbank_level);
-			
-			Out.kr(phase_out, Select.kr(useBufRd, [pos_sig, Select.kr(aOrB, [t_buf_pos_b, t_buf_pos_a]) / BufFrames.kr(buf1)]));
-			Out.kr(level_out, level);
+			Out.ar(out, stereo_sig * level * gain * smooth_mute);
+			Out.ar(saturation_out, stereo_sig * level * saturation_level * smooth_mute);
+			Out.ar(delay_out, stereo_sig * level * delay_level * smooth_mute);
+			Out.ar(reverb_out, stereo_sig * level * reverb_level * smooth_mute);
+			Out.ar(filterbank_out, stereo_sig * level * filterbank_level * smooth_mute);
+			Out.kr(phase_out, (Select.kr(useBufRd, [pos_sig, Select.kr(aOrB, [t_buf_pos_b, t_buf_pos_a]) / BufFrames.kr(buf1)]) * smooth_mute));
+			Out.kr(level_out, level * smooth_mute);
 		}).add;
+
 
 
 
@@ -482,6 +483,8 @@ Engine_MSG : CroneEngine {
 			voices[voice].set(\gate, msg[2]);
 		});
 
+
+
 		this.addCommand("speed", "if", { arg msg;
 			var voice = msg[1] - 1;
 			voices[voice].set(\speed, msg[2]);
@@ -525,6 +528,11 @@ Engine_MSG : CroneEngine {
 		this.addCommand("volume", "if", { arg msg;
 			var voice = msg[1] - 1;
 			voices[voice].set(\gain, msg[2]);
+		});
+
+		this.addCommand("mute", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\mute, msg[2]);
 		});
 
 		this.addCommand("pan", "if", { arg msg;

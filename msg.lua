@@ -1,18 +1,9 @@
 -- MSG (Modulated Stereo Glut)
--- Granular sampler with LFO modulation. Requires a grid.
+-- Granular sampler with LFO modulation. Requires a grid zero and arc.
 --
--- Key Controls:
--- Grid rows 3-14: Trigger and
--- control voices.
--- Grid row 1+2: Record and
--- playback patterns.
--- Encoders: Adjust parameters.
--- Enc 1: Select voice.
--- Key 2: Toggle play/stop for
--- selected voice.
--- Key 3: Change screen.
 
--- Engine and device connections
+arc_utils = include('lib/arc_utils')
+utils = include('lib/utils')
 
 engine.name = 'MSG'
 local LFO = require 'lfo'
@@ -27,7 +18,8 @@ local selected_arc = 1
 local arc1_params = { "position", "speed", "size", "density" }
 local arc2_params = { "volume", "spread", "jitter", "filter" }
 local arc3_params = { "filterbank", "saturation", "reverb", "delay" }
-local_arc_params = { arc1_params, arc2_params, arc3_params }
+local speed_display_values = { 0, 12.5, 25, 50, 100, 200, 400, 800 }
+
 
 -- Voice and control parameters
 local selected_voice = 1
@@ -76,12 +68,10 @@ local min_size = 1
 local max_size = 200
 local min_density = 0
 local max_density = 200
-local min_speed = -400
-local max_speed = 400
+local min_speed = -800
+local max_speed = 800
 local min_position = 0
 local max_position = 1
-local min_volume = -60
-local max_volume = 20
 local min_filterbank = -60
 local max_filterbank = 20
 local min_saturation = -60
@@ -100,6 +90,16 @@ local min_pan = -1
 local max_pan = 1
 local min_semitones = -7
 local max_semitones = 7
+local min_volume = -60
+local max_volume = 20
+local min_delay_send = -60
+local max_delay_send = 20
+local min_filterbank_send = -60
+local max_filterbank_send = 20
+local min_saturation_send = -60
+local max_saturation_send = 20
+local min_reverb_send = -60
+local max_reverb_send = 20
 
 --state
 local state_led_levels = {}
@@ -177,7 +177,6 @@ local function record_grid_event(x, y, z)
     record_prevtime = current_time
   end
 end
-
 
 local function record_arc_event(n, d)
   local current_arc_params = {
@@ -432,20 +431,16 @@ function grid_refresh()
   grid_ctl:led_level_all(0)
   grid_voc:led_level_all(0)
 
-  -- alt
   grid_ctl:led_level_set(16, 1, alt and 15 or 1)
 
-  -- Voice controls
   for i = 1, VOICES do
-    local voice_level = 2 -- Default soft lighting for unselected voices
+    local voice_level = 2
     if gates[i] > 0 then
-      voice_level = 8     -- Set level to 8 for running voices
+      voice_level = 8
     end
-
     if i == selected_voice then
-      voice_level = math.floor(swell) -- Apply swell effect when any voice is playing
+      voice_level = math.floor(swell)
     end
-
     if i <= 5 then
       grid_ctl:led_level_set(i, 1, voice_level)
     else
@@ -453,26 +448,22 @@ function grid_refresh()
     end
   end
 
-  -- Recorder controls
   for i = 1, RECORDER do
-    local level = 2 -- Default level for recorders
-
-    if #grid_pattern_banks[i] > 0 then level = 5 end
-    if #arc_pattern_banks[i] > 0 then level = 5 end
+    local level = 2
+    if #grid_pattern_banks[i] > 0 or #arc_pattern_banks[i] > 0 then
+      level = 5
+    end
     if pattern_timers[i].is_running then
       level = 10
-
       if pattern_leds[i] > 0 then
         level = 12
       end
     end
-
-    local row = (i <= 8) and 1 or 2 -- Place first 8 in the first row, next 8 in the second row
-    local col = ((i - 1) % 8) + 7   -- Place recorders in columns 7 to 14
+    local row = (i <= 8) and 1 or 2
+    local col = ((i - 1) % 8) + 7
     grid_ctl:led_level_set(col, row, level)
   end
 
-  -- Arc Screen mode
   if selected_arc == 1 then
     grid_ctl:led_level_set(15, 1, 0)
   elseif selected_arc == 2 then
@@ -481,14 +472,12 @@ function grid_refresh()
     grid_ctl:led_level_set(15, 1, 15)
   end
 
-  -- blink armed pattern
   if record_bank > 0 then
     local row = (record_bank <= 8) and 1 or 2
     local col = ((record_bank - 1) % 8) + 7
     grid_ctl:led_level_set(col, row, 10 * blink)
   end
 
-  -- voice positions
   for i = 1, VOICES do
     if voice_levels[i] > 0 then
       if i <= 6 then
@@ -499,12 +488,9 @@ function grid_refresh()
     end
   end
 
-  -- Semitones display on the last row (row 16)
   local semitones = params:get(selected_voice .. "semitones")
   for col = 1, 16 do
-    local level = 1 -- Default dim lighting
-
-    -- Highlight the center (semitones = 0) at positions 8 and 9
+    local level = 1
     if col == 8 or col == 9 then
       level = 8
     end
@@ -519,33 +505,39 @@ function grid_refresh()
     grid_ctl:led_level_set(9, 16, 15)
   end
 
-  -- Speed display on the second last row (row 15)
   local speed = params:get(selected_voice .. "speed")
-  for col = 4, 13 do
-    local level = 1 -- Default dim lighting
+  local max_brightness = 15
 
-    -- Highlight the center (speed = 0) at positions 8 and 9
-    if col == 8 or col == 9 then
-      level = 0
+  local function calculate_brightness(speed, value)
+    if speed == 0 and value == 0 then
+      return 2
     end
+    local diff = math.abs(speed - value)
+    if diff == 0 then
+      return max_brightness
+    elseif diff < math.abs(speed) then
+      return max_brightness - math.floor((diff / math.abs(speed)) * (max_brightness - 1))
+    else
+      return 0
+    end
+  end
+  for i, value in ipairs(speed_display_values) do
+    local col = i + 8
+    local level = calculate_brightness(math.abs(speed), value)
     grid_ctl:led_level_set(col, 15, level)
   end
-  if speed < 0 then
-    grid_ctl:led_level_set(8 + math.floor(speed / 100), 15, 15)
-  elseif speed > 0 then
-    grid_ctl:led_level_set(9 + math.floor(speed / 100), 15, 15)
-  else
-    grid_ctl:led_level_set(8, 15, 15)
-    grid_ctl:led_level_set(9, 15, 15)
-  end
+  grid_ctl:led_level_set(9, 15, 1)
 
-  -- Display toggles for hold and granular on row 15
+  local speed_direction = params:get(selected_voice .. "speed") > 0 and 1 or -1
+  grid_ctl:led_level_set(7, 15, speed_direction == -1 and 10 or 1)
+
   local hold = params:get(selected_voice .. "hold")
   local granular = params:get(selected_voice .. "granular")
-  grid_ctl:led_level_set(1, 15, hold == 1 and 10 or 1)
-  grid_ctl:led_level_set(2, 15, granular == 1 and 10 or 1)
+  local mute = params:get(selected_voice .. "mute")
+  grid_ctl:led_level_set(1, 15, hold == 0 and 10 or 1)
+  grid_ctl:led_level_set(2, 15, granular == 0 and 10 or 1)
+  grid_ctl:led_level_set(3, 15, mute == 1 and 10 or 1)
 
-  -- State LEDs on row 14
   for i = 1, STATES do
     grid_ctl:led_level_set(i, 14, state_led_levels[i])
   end
@@ -590,7 +582,6 @@ function grid_key(x, y, z, skip_record)
       end
       params:set(selected_voice .. "semitones", semitone_value)
     elseif y == 15 then
-      -- Handle speed changes on the second last row
       if x == 1 then
         -- Toggle hold on/off
         local hold = params:get(selected_voice .. "hold")
@@ -599,17 +590,22 @@ function grid_key(x, y, z, skip_record)
         -- Toggle between buffer and granular mode
         local granular = params:get(selected_voice .. "granular")
         params:set(selected_voice .. "granular", granular == 0 and 1 or 0)
+      elseif x == 3 then
+        -- Toggle mute on/off
+        local mute = params:get(selected_voice .. "mute")
+        params:set(selected_voice .. "mute", mute == 0 and 1 or 0)
+      elseif x == 7 then
+        -- Toggle between forward and reverse for speed
+        local speed = params:get(selected_voice .. "speed") * -1
+        params:set(selected_voice .. "speed", speed)
       else
-        -- Handle speed changes on the second last row
-        local speed_value
-        if x > 9 then
-          speed_value = (x - 9) * 100
-        elseif x == 9 or x == 8 then
-          speed_value = 0
-        else
-          speed_value = (x - 8) * 100
+        -- Handle speed changes
+        local index = x - 8
+        if index >= 1 and index <= #speed_display_values then
+          local speed_value = speed_display_values[index]
+          local direction = params:get(selected_voice .. "speed") > 0 and 1 or -1
+          params:set(selected_voice .. "speed", speed_value * direction)
         end
-        params:set(selected_voice .. "speed", speed_value)
       end
     else
       topbar_key(x, y, z)
@@ -868,12 +864,13 @@ function init_params()
 
 
 
+
   -- Voice Parameters
   for v = 1, VOICES do
     params:add_separator("VOICE " .. v)
 
     -- Audio Parameters
-    params:add_group(v .. " AUDIO", 10)
+    params:add_group(v .. " AUDIO", 11)
 
     params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
     params:set_action(v .. "filter", function(value) engine.filter(v, value) end)
@@ -881,10 +878,15 @@ function init_params()
     params:add_taper(v .. "pan", v .. " pan", -1, 1, 0, 0)
     params:set_action(v .. "pan", function(value) engine.pan(v, value) end)
 
+    params:add_binary(v .. "mute", v .. " mute", "toggle", 1)
+    params:set_action(v .. "mute", function(value) engine.mute(v, value) end)
+
     params:add_binary(v .. "play_stop", v .. " play/stop", "toggle", 0)
     params:set_action(v .. "play_stop", function(value)
       if value == 1 then start_voice(v, positions[v]) else stop_voice(v) end
     end)
+
+
 
     params:add_binary(v .. "granular", v .. " granular/buffer", "toggle", 0)
     params:set_action(v .. "granular", function(value) engine.useBufRd(v, value) end)
@@ -892,19 +894,21 @@ function init_params()
 
     params:add_separator("LEVELS/SENDS")
 
-    params:add_taper(v .. "volume", v .. " volume", -60, 20, 0, 0, "dB")
+    params:add_taper(v .. "volume", v .. " volume", min_volume, max_volume, 0, 0, "dB")
     params:set_action(v .. "volume", function(value) engine.volume(v, math.pow(10, value / 20)) end)
 
-    params:add_taper(v .. "saturation", v .. " saturation", -60, 20, -60, 0, "dB")
+    params:add_taper(v .. "saturation", v .. " saturation", min_saturation_send, max_saturation_send, min_delay_send, 0,
+      "dB")
     params:set_action(v .. "saturation", function(value) engine.saturation(v, math.pow(10, value / 20)) end)
 
-    params:add_taper(v .. "delay", v .. " delay", -60, 20, -60, 0, "dB")
+    params:add_taper(v .. "delay", v .. " delay", min_delay_send, max_delay_send, min_delay_send, 0, "dB")
     params:set_action(v .. "delay", function(value) engine.delay(v, math.pow(10, value / 20)) end)
 
-    params:add_taper(v .. "reverb", v .. " reverb", -60, 20, -60, 0, "dB")
+    params:add_taper(v .. "reverb", v .. " reverb", min_reverb_send, max_reverb_send, min_delay_send, 0, "dB")
     params:set_action(v .. "reverb", function(value) engine.reverb(v, math.pow(10, value / 20)) end)
 
-    params:add_taper(v .. "filterbank", v .. " filterbank", -60, 20, -60, 0, "dB")
+    params:add_taper(v .. "filterbank", v .. " filterbank", min_filterbank_send, max_filterbank_send, min_delay_send, 0,
+      "dB")
     params:set_action(v .. "filterbank", function(value) engine.filterbank(v, math.pow(10, value / 20)) end)
 
     -- Granular Parameters
@@ -919,9 +923,6 @@ function init_params()
       end
     }
 
-
-
-
     params:add_number(v .. "semitones", v .. sep .. "semitones", min_semitones, max_semitones, 0)
     params:set_action(v .. "semitones", function(value) engine.semitones(v, math.floor(value + 0.5)) end)
 
@@ -931,6 +932,8 @@ function init_params()
       local actual_speed = util.clamp(value, min_speed, max_speed)
       engine.speed(v, actual_speed / 100)
     end)
+
+
 
     -- Voice Position
     params:add {
@@ -1111,13 +1114,13 @@ function update_arc_display()
     local size = params:get(selected_voice .. "size")
     local density = params:get(selected_voice .. "density")
 
-    local position_angle = scale_angle(position, 1)
+    local position_angle = arc_utils.scale_angle(position, 1)
     arc_device:segment(1, position_angle, position_angle + 0.2, 15)
 
-    display_progress_bar(2, speed, min_speed, max_speed)
-    display_percent_markers(2, -100, 0, 100)
-    display_progress_bar(3, size, min_size, max_size)
-    display_progress_bar(4, density, min_density, max_density)
+    arc_utils.display_progress_bar(arc_device, 2, speed, min_speed, max_speed)
+    arc_utils.display_percent_markers(arc_device, 2, -100, 0, 100)
+    arc_utils.display_progress_bar(arc_device, 3, size, min_size, max_size)
+    arc_utils.display_progress_bar(arc_device, 4, density, min_density, max_density)
   elseif selected_arc == 2 then
     -- Display parameters for arc screen mode
     local volume = params:get(selected_voice .. "volume")
@@ -1125,10 +1128,10 @@ function update_arc_display()
     local jitter = params:get(selected_voice .. "jitter")
     local filter = params:get(selected_voice .. "filter")
 
-    display_progress_bar(1, volume, min_volume, max_volume)
-    display_spread_pattern(2, spread, 0, max_spread) -- Update arc for spread
-    display_random_pattern(3, jitter, 0, max_jitter)
-    display_filter_pattern(4, filter, 0, max_filter)
+    arc_utils.display_progress_bar(arc_device, 1, volume, min_volume, max_volume)
+    arc_utils.display_spread_pattern(arc_device, 2, spread, 0, max_spread) -- Update arc for spread
+    arc_utils.display_random_pattern(arc_device, 3, jitter, 0, max_jitter)
+    arc_utils.display_filter_pattern(arc_device, 4, filter, 0, max_filter)
   elseif selected_arc == 3 then
     -- Display parameters for arc screen mode
     local filterbank = params:get(selected_voice .. "filterbank")
@@ -1136,213 +1139,13 @@ function update_arc_display()
     local reverb = params:get(selected_voice .. "reverb")
     local delay = params:get(selected_voice .. "delay")
 
-    display_progress_bar(1, filterbank, min_filterbank, max_filterbank)
-    display_progress_bar(2, saturation, min_saturation, max_saturation)
-    display_progress_bar(3, reverb, min_reverb, max_reverb)
-    display_progress_bar(4, delay, min_delay, max_delay)
+    arc_utils.display_progress_bar(arc_device, 1, filterbank, min_filterbank, max_filterbank)
+    arc_utils.display_progress_bar(arc_device, 2, saturation, min_saturation, max_saturation)
+    arc_utils.display_progress_bar(arc_device, 3, reverb, min_reverb, max_reverb)
+    arc_utils.display_progress_bar(arc_device, 4, delay, min_delay, max_delay)
   end
 
   arc_device:refresh()
-end
-
-function display_percent_markers(encoder, ...)
-  local markers = { ... }
-  for _, percent in ipairs(markers) do
-    -- Map percent from [-200, 200] to LED positions [1, 64]
-    local led_position = math.floor(((percent + 200) / 400) * 64) + 1
-    led_position = util.clamp(led_position, 1, 64) -- Ensure LED position is within 1 to 64
-    local brightness = 15
-
-    -- Display the marker on the arc
-    arc_device:led(encoder, led_position, brightness)
-  end
-end
-
-function display_spread_pattern(encoder, value, min, max)
-  local normalized = (value - min) / (max - min)
-  local total_leds = 64
-  local spread_leds = math.floor(normalized * total_leds / 2)
-
-  for led = 1, total_leds do
-    arc_device:led(encoder, led, 0)
-  end
-
-  local center_led = math.floor(total_leds / 2)
-  local start_led = math.max(center_led - spread_leds, 1)
-  local end_led = math.min(center_led + spread_leds, total_leds)
-
-  for led = start_led, end_led do
-    local distance_from_center = math.max(math.abs(center_led - led), 1)
-    local brightness = math.min(0 + (distance_from_center * 2), 15)
-    brightness = math.max(brightness, 3)
-
-    arc_device:led(encoder, led + 1 - 32, brightness)
-  end
-  arc_device:refresh()
-end
-
-function display_progress_bar(encoder, value, min, max)
-  local normalized = normalize_param_value(value, min, max)
-  local brightness_max = 12
-  local gradient_factor = 1
-
-  for led = 1, 64 do
-    if led <= normalized then
-      local distance = math.abs(normalized - led)
-      local brightness = math.max(1, brightness_max - (distance * gradient_factor))
-      arc_device:led(encoder, led + 1, brightness)
-    else
-      arc_device:led(encoder, led + 1, 0)
-    end
-  end
-end
-
-function display_filter_pattern(encoder, value, min, max)
-  local total_leds = 64
-  local midpoint_led = total_leds / 2 + 1        -- LED 33 is the top center
-  local normalized = (value - min) / (max - min) -- Normalize value to [0, 1]
-  local brightness = 5
-
-  for led = 1, total_leds do
-    arc_device:led(encoder, led, 0)
-  end
-
-  if value <= 0.5 then
-    local active_leds_each_side = math.floor(normalized * 2 * midpoint_led)
-    for i = 0, active_leds_each_side - 1 do
-      arc_device:led(encoder, (midpoint_led - i - 1) % total_leds + 1, brightness) -- Left side
-      arc_device:led(encoder, (midpoint_led + i - 1) % total_leds + 1, brightness) -- Right side
-    end
-  else
-    local inactive_leds_each_side = math.floor((normalized - 0.5) * 2 * midpoint_led)
-    for i = 0, midpoint_led - inactive_leds_each_side - 1 do
-      arc_device:led(encoder, (1 + i - 1) % total_leds + 1, brightness)
-      arc_device:led(encoder, (total_leds - i - 1) % total_leds + 1, brightness)
-    end
-  end
-
-  if value == max then
-    arc_device:led(encoder, midpoint_led, 15)
-  elseif value == min then
-    arc_device:led(encoder, 1, 15)
-  else
-    arc_device:led(encoder, 1, 15)
-    arc_device:led(encoder, midpoint_led, 15)
-  end
-end
-
-function display_rotating_pattern(encoder, value, min, max)
-  local normalized = normalize_param_value(value, min, max)
-  local start_led = (normalized % 64) + 1
-  local pattern_width = 2
-  local max_brightness = 10
-
-  for i = -pattern_width, pattern_width do
-    local led = (start_led + i - 1) % 64 + 1
-    local brightness = max_brightness - math.abs(i) * 3
-    brightness = math.max(brightness, 1)
-    arc_device:led(encoder, led, brightness)
-  end
-end
-
-function display_stepped_pattern(encoder, value, min, max, steps)
-  local leds_per_step = 64 / steps
-  local step = math.floor((value - min) / (max - min) * (steps - 1)) + 1
-
-  if leds_per_step % 1 ~= 0 then
-    arc_device:led(encoder, 1, 8)
-  end
-
-  for s = 1, steps do
-    local start_led = math.floor((s - 1) * leds_per_step) + 1
-    local end_led = math.floor(s * leds_per_step)
-
-    for led = start_led, end_led do
-      if s == step then
-        arc_device:led(encoder, led, 12)
-      else
-        arc_device:led(encoder, led, 2)
-      end
-    end
-
-    if start_led > 1 then
-      arc_device:led(encoder, start_led - 1, 8)
-    end
-    if end_led < 64 then
-      arc_device:led(encoder, end_led + 1, 8)
-    end
-  end
-
-  if leds_per_step % 1 ~= 0 or steps * leds_per_step < 64 then
-    arc_device:led(encoder, 64, 8)
-  end
-end
-
-function display_random_pattern(encoder, value, min, max)
-  local normalized_value = (value - min) / (max - min)
-  local chance = 1 - normalized_value
-
-  for led = 1, 64 do
-    if math.random() > chance then
-      arc_device:led(encoder, led, math.random(5, 12))
-    else
-      arc_device:led(encoder, led, 0)
-    end
-  end
-end
-
-function display_exponential_pattern(encoder, value, min, max)
-  local normalized = (math.log(value) - math.log(min)) / (math.log(max) - math.log(min))
-  local led_position = math.floor(normalized * 64)
-
-  for led = 1, 64 do
-    if led == led_position then
-      arc_device:led(encoder, led, 15)
-    elseif led < led_position then
-      arc_device:led(encoder, led, 3)
-    else
-      arc_device:led(encoder, led, 0)
-    end
-  end
-end
-
-function display_panning_value(encoder, value, min, max)
-  local total_leds = 64
-  local center_led = math.floor(total_leds / 2) + 1
-  local range = max - min
-  local normalized_value = (value - min) / range
-  local led_position = math.floor((normalized_value - 0.5) * total_leds / 3) + center_led
-
-  -- Clear all LEDs first
-  for led = 1, total_leds do
-    arc_device:led(encoder, led, 0)
-  end
-
-  -- Light up LEDs based on the value
-  if value < 0 then
-    for led = center_led, led_position, -1 do
-      arc_device:led(encoder, led, 15)
-    end
-  elseif value > 0 then
-    for led = center_led, led_position do
-      arc_device:led(encoder, led, 15)
-    end
-  else
-    arc_device:led(encoder, center_led, 15)
-  end
-end
-
-function normalize_param_value(value, min, max)
-  local range = max - min
-  return math.floor(((value - min) / range) * 64)
-end
-
-function scale_angle(value, scale)
-  local angle = value * 2 * math.pi
-  if math.abs(value - scale) < 0.0001 then -- Allow for a tiny margin of error
-    angle = angle - 0.0001                 -- Subtract a tiny value to avoid reaching 2 * pi
-  end
-  return angle
 end
 
 -- ENCODERS AND KEYS
@@ -1401,80 +1204,85 @@ function redraw()
   screen.clear()
 
   -- Display selected track number at the top with large font
-  local track_number_x = 20
+  local track_number_x = 0
   local track_number_y = 20
   screen.move(track_number_x, track_number_y)
   screen.level(gates[selected_voice] > 0 and 15 or 2)
   screen.font_size(24)
-  screen.text_right(string.format(selected_voice))
+  screen.text(string.format(selected_voice))
   screen.font_size(8)
 
   -- Underline the track number if hold is off
   if params:get(selected_voice .. "hold") == 0 then
-    local underline_start_x = track_number_x - 40
-    local underline_end_x = track_number_x + 2
-    local underline_y = track_number_y + 2
+    local underline_start_x = track_number_x
+    local underline_end_x = track_number_x + 30
+    local underline_y = track_number_y + 4
+    screen.move(underline_start_x, underline_y)
+    screen.line(underline_end_x, underline_y)
+    screen.close()
+    screen.stroke()
+  end
 
-    -- Draw a thicker line by drawing multiple lines close to each other
-    for i = 0, 1 do
-      screen.move(underline_start_x, underline_y + i)
-      screen.line(underline_end_x, underline_y + i)
-      screen.stroke()
+  local hold_state_y = track_number_y + 20
+
+  -- Display Granular/Buffer mode with graphical representation
+  local mode_y = hold_state_y
+  screen.level(15)
+  if params:get(selected_voice .. "granular") == 0 then
+    -- Draw particles for Granular mode
+    for i = 1, 10 do
+      local x = track_number_x + math.random(0, 10)
+      local y = mode_y + math.random(-10, 10)
+      screen.pixel(x, y)
     end
+    screen.fill()
+  end
+
+  -- Display Mute state with graphical representation
+  local mute_state_y = mode_y + 18
+  local mute_state_x = track_number_x + 1
+  local mute_box_size = 10
+  screen.move(mute_state_x, mute_state_y)
+  screen.level(2)
+  screen.rect(mute_state_x, mute_state_y, mute_box_size, mute_box_size / 2)
+  screen.stroke()
+  if params:get(selected_voice .. "mute") == 1 then
+    screen.level(12)
+    screen.rect(mute_state_x, mute_state_y, mute_box_size - 1, mute_box_size / 2 - 1)
+    screen.fill()
   end
 
   -- Set the start position for parameter display
   local param_y_start = 10
-  local param_x_start = 100
+  local param_x_start = 50
   local line_spacing = 10
 
   -- First pair: Filter and Volume
   screen.move(param_x_start, param_y_start)
   screen.level(current_screen == 1 and 15 or 2)
-  screen.text_right("Filter: " .. string.format("%.2f", params:get(selected_voice .. "filter")))
+  screen.text("Filter: " .. string.format("%.2f", params:get(selected_voice .. "filter")))
 
   screen.move(param_x_start, param_y_start + line_spacing)
   screen.level(current_screen == 1 and 15 or 2)
-  screen.text_right("Volume: " .. string.format("%.2f dB", params:get(selected_voice .. "volume")))
+  screen.text("Volume: " .. string.format("%.2f dB", params:get(selected_voice .. "volume")))
 
   -- Second pair: Size and Density
   screen.move(param_x_start, param_y_start + 2 * line_spacing)
   screen.level(current_screen == 2 and 15 or 2)
-  screen.text_right("Size: " .. string.format("%.2f ms", params:get(selected_voice .. "size")))
+  screen.text("Size: " .. string.format("%.2f ms", params:get(selected_voice .. "size")))
 
   screen.move(param_x_start, param_y_start + 3 * line_spacing)
   screen.level(current_screen == 2 and 15 or 2)
-  screen.text_right("Density: " .. string.format("%.2f Hz", params:get(selected_voice .. "density")))
+  screen.text("Density: " .. string.format("%.2f Hz", params:get(selected_voice .. "density")))
 
   -- Third pair: Position and Speed
   screen.move(param_x_start, param_y_start + 4 * line_spacing)
   screen.level(current_screen == 3 and 15 or 2)
-  screen.text_right("Position: " .. string.format("%.2f", positions[selected_voice]))
+  screen.text("Position: " .. string.format("%.2f", positions[selected_voice]))
 
   screen.move(param_x_start, param_y_start + 5 * line_spacing)
   screen.level(current_screen == 3 and 15 or 2)
-  screen.text_right("Speed: " .. string.format("%.2f%%", params:get(selected_voice .. "speed")))
-
-  -- Vertical track line and position indicator
-  local trackLineX = 125
-  local trackLineLength = 60
-  local trackLineYStart = 2
-  local trackLineYEnd = trackLineYStart + trackLineLength
-  screen.level(2)
-  screen.move(trackLineX, trackLineYStart)
-  screen.line(trackLineX, trackLineYEnd)
-  screen.stroke()
-
-  -- Display position indicator only if the track is playing
-  screen.level(15)
-  if gates[selected_voice] > 0 then
-    local position = positions[selected_voice]
-    if position >= 0 then
-      local positionY = trackLineYStart + (trackLineLength * position)
-      screen.circle(trackLineX, positionY, 2)
-      screen.fill()
-    end
-  end
+  screen.text("Speed: " .. string.format("%.2f%%", params:get(selected_voice .. "speed")))
 
   screen.update()
 end
@@ -1569,8 +1377,8 @@ end
 -- Function to save patterns to params
 function save_patterns_to_params()
   for i = 1, RECORDER do
-    local grid_pattern_serialized = serialize_table(grid_pattern_banks[i])
-    local arc_pattern_serialized = serialize_table(arc_pattern_banks[i])
+    local grid_pattern_serialized = utils.serialize_table(grid_pattern_banks[i])
+    local arc_pattern_serialized = utils.serialize_table(arc_pattern_banks[i])
     params:set("pattern_" .. i .. "_grid", grid_pattern_serialized)
     params:set("pattern_" .. i .. "_arc", arc_pattern_serialized)
   end
@@ -1579,13 +1387,13 @@ end
 -- Function to load patterns from params
 function load_pattern_from_param(n, grid_serialized, arc_serialized)
   if grid_serialized ~= "" then
-    grid_pattern_banks[n] = deserialize_table(grid_serialized)
+    grid_pattern_banks[n] = utils.deserialize_table(grid_serialized)
   else
     grid_pattern_banks[n] = {}
   end
 
   if arc_serialized ~= "" then
-    arc_pattern_banks[n] = deserialize_table(arc_serialized)
+    arc_pattern_banks[n] = utils.deserialize_table(arc_serialized)
   else
     arc_pattern_banks[n] = {}
   end
@@ -1597,7 +1405,7 @@ function save_state(state)
   for voice = 1, VOICES do
     state_table[voice] = gather_voice_params(voice)
   end
-  local serialized = serialize_table(state_table)
+  local serialized = utils.serialize_table(state_table)
   params:set("state_" .. state, serialized)
 end
 
@@ -1605,7 +1413,7 @@ end
 function load_state(state)
   local serialized = params:get("state_" .. state)
   if serialized ~= "" then
-    local state_table = deserialize_table(serialized)
+    local state_table = utils.deserialize_table(serialized)
     if state_table then
       for voice = 1, VOICES do
         set_voice_params(voice, state_table[voice])
@@ -1615,47 +1423,6 @@ function load_state(state)
       grid_refresh() -- Call grid_refresh to update the grid after loading the state
     end
   end
-end
-
--- Table Serializer/Deserializer
-function deserialize_table(serialized)
-  print("Deserializing: " .. serialized)
-  local func, err = load("return " .. serialized)
-  if func then
-    local success, result = pcall(func)
-    if success then
-      return result
-    else
-      error("Error deserializing table: " .. result)
-    end
-  else
-    error("Error loading serialized string: " .. err)
-  end
-end
-
-function serialize_table(t)
-  local serialized = "{"
-  for key, value in pairs(t) do
-    if type(key) == "number" then
-      serialized = serialized .. "[" .. tostring(key) .. "]="
-    else
-      serialized = serialized .. "['" .. tostring(key) .. "']="
-    end
-
-    if type(value) == "table" then
-      serialized = serialized .. serialize_table(value)
-    elseif type(value) == "number" then
-      serialized = serialized .. value
-    elseif type(value) == "string" then
-      serialized = serialized .. "\"" .. value .. "\""
-    elseif type(value) == "boolean" then
-      serialized = serialized .. tostring(value)
-    end
-
-    serialized = serialized .. ","
-  end
-  serialized = serialized .. "}"
-  return serialized
 end
 
 function gather_voice_params(voice)
