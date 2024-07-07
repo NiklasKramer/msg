@@ -88,8 +88,10 @@ local min_filter = 0
 local max_filter = 1
 local min_pan = -1
 local max_pan = 1
-local min_semitones = -7
-local max_semitones = 7
+local min_semitones = -36
+local max_semitones = 36
+local min_octaves = -7
+local max_octaves = 7
 local min_volume = -60
 local max_volume = 20
 local min_delay_send = -60
@@ -327,7 +329,7 @@ local function handle_state_grid(x, z)
       if state_serialized == "" then
         -- Save state
         save_state(x)
-        state_led_levels[x] = 5
+        state_led_levels[x] = 2
       else
         -- Load state
         load_state(x)
@@ -335,7 +337,7 @@ local function handle_state_grid(x, z)
           if i == x then
             state_led_levels[i] = 15
           elseif params:get("state_" .. i) ~= "" then
-            state_led_levels[i] = 5
+            state_led_levels[i] = 2
           else
             state_led_levels[i] = 0
           end
@@ -431,12 +433,12 @@ function grid_refresh()
   grid_ctl:led_level_all(0)
   grid_voc:led_level_all(0)
 
-  grid_ctl:led_level_set(16, 1, alt and 15 or 1)
+  grid_ctl:led_level_set(16, 1, alt and 15 or 8)
 
   for i = 1, VOICES do
-    local voice_level = 2
+    local voice_level = 1
     if gates[i] > 0 then
-      voice_level = 8
+      voice_level = 4
     end
     if i == selected_voice then
       voice_level = math.floor(swell)
@@ -449,14 +451,14 @@ function grid_refresh()
   end
 
   for i = 1, RECORDER do
-    local level = 2
+    local level = 3
     if #grid_pattern_banks[i] > 0 or #arc_pattern_banks[i] > 0 then
-      level = 5
+      level = 7
     end
     if pattern_timers[i].is_running then
-      level = 10
+      level = 15
       if pattern_leds[i] > 0 then
-        level = 12
+        level = 15
       end
     end
     local row = (i <= 8) and 1 or 2
@@ -465,17 +467,17 @@ function grid_refresh()
   end
 
   if selected_arc == 1 then
-    grid_ctl:led_level_set(15, 1, 0)
+    grid_ctl:led_level_set(16, 2, 1)
   elseif selected_arc == 2 then
-    grid_ctl:led_level_set(15, 1, 7)
+    grid_ctl:led_level_set(16, 2, 9)
   elseif selected_arc == 3 then
-    grid_ctl:led_level_set(15, 1, 15)
+    grid_ctl:led_level_set(16, 2, 15)
   end
 
   if record_bank > 0 then
     local row = (record_bank <= 8) and 1 or 2
     local col = ((record_bank - 1) % 8) + 7
-    grid_ctl:led_level_set(col, row, 10 * blink)
+    grid_ctl:led_level_set(col, row, 12 * blink)
   end
 
   for i = 1, VOICES do
@@ -488,19 +490,24 @@ function grid_refresh()
     end
   end
 
-  local semitones = params:get(selected_voice .. "semitones")
+  local value
+  if alt then
+    value = params:get(selected_voice .. "octaves")
+  else
+    value = params:get(selected_voice .. "semitones")
+  end
   for col = 1, 16 do
     local level = 1
     if col == 8 or col == 9 then
-      level = 8
+      level = 5
     end
     grid_ctl:led_level_set(col, 16, level)
   end
-  if semitones < 0 and semitones > -8 then
-    grid_ctl:led_level_set(semitones + 8, 16, 15)
-  elseif semitones > 0 and semitones < 8 then
-    grid_ctl:led_level_set(semitones + 9, 16, 15)
-  elseif semitones == 0 then
+  if value < 0 and value > -8 then
+    grid_ctl:led_level_set(value + 8, 16, 15)
+  elseif value > 0 and value < 8 then
+    grid_ctl:led_level_set(value + 9, 16, 15)
+  elseif value == 0 then
     grid_ctl:led_level_set(8, 16, 15)
     grid_ctl:led_level_set(9, 16, 15)
   end
@@ -526,17 +533,20 @@ function grid_refresh()
     local level = calculate_brightness(math.abs(speed), value)
     grid_ctl:led_level_set(col, 15, level)
   end
+  if math.abs(speed) < 100 then
+    grid_ctl:led_level_set(13, 15, 1)
+  end
   grid_ctl:led_level_set(9, 15, 1)
 
   local speed_direction = params:get(selected_voice .. "speed") > 0 and 1 or -1
-  grid_ctl:led_level_set(7, 15, speed_direction == -1 and 10 or 1)
+  grid_ctl:led_level_set(7, 15, speed_direction == -1 and 12 or 5)
 
   local hold = params:get(selected_voice .. "hold")
   local granular = params:get(selected_voice .. "granular")
   local mute = params:get(selected_voice .. "mute")
-  grid_ctl:led_level_set(1, 15, hold == 0 and 10 or 1)
-  grid_ctl:led_level_set(2, 15, granular == 0 and 10 or 1)
-  grid_ctl:led_level_set(3, 15, mute == 1 and 10 or 1)
+  grid_ctl:led_level_set(1, 15, hold == 0 and 12 or 5)
+  grid_ctl:led_level_set(2, 15, granular == 0 and 12 or 5)
+  grid_ctl:led_level_set(3, 15, mute == 1 and 12 or 5)
 
   for i = 1, STATES do
     grid_ctl:led_level_set(i, 14, state_led_levels[i])
@@ -580,7 +590,11 @@ function grid_key(x, y, z, skip_record)
       else
         semitone_value = x - 8
       end
-      params:set(selected_voice .. "semitones", semitone_value)
+      if alt then
+        params:set(selected_voice .. "octaves", semitone_value)
+      else
+        params:set(selected_voice .. "semitones", semitone_value)
+      end
     elseif y == 15 then
       if x == 1 then
         -- Toggle hold on/off
@@ -633,7 +647,7 @@ function topbar_key(x, y, z)
     if x == 16 and y == 1 then
       -- alt
       alt = z == 1
-    elseif x == 15 and y == 1 then
+    elseif x == 16 and y == 2 then
       -- Toggle arc screen mode
       selected_arc = selected_arc + 1
       if selected_arc > 3 then selected_arc = 1 end
@@ -912,7 +926,7 @@ function init_params()
     params:set_action(v .. "filterbank", function(value) engine.filterbank(v, math.pow(10, value / 20)) end)
 
     -- Granular Parameters
-    params:add_group(v .. " GRANULAR", 8)
+    params:add_group(v .. " GRANULAR", 9)
     params:add {
       type = "control",
       id = v .. "finetune",
@@ -925,6 +939,9 @@ function init_params()
 
     params:add_number(v .. "semitones", v .. sep .. "semitones", min_semitones, max_semitones, 0)
     params:set_action(v .. "semitones", function(value) engine.semitones(v, math.floor(value + 0.5)) end)
+
+    params:add_number(v .. "octaves", v .. sep .. "octaves", min_octaves, max_octaves, 0)
+    params:set_action(v .. "octaves", function(value) engine.octaves(v, math.floor(value + 0.5)) end)
 
 
     params:add_taper(v .. "speed", v .. sep .. "speed", min_speed, max_speed, 100, 0, "%")
@@ -1048,6 +1065,14 @@ function init_params()
 
   for state = 1, 16 do
     params:add_text("state_" .. state, "State " .. state, "")
+    params:set_action("state_" .. state, function(value)
+      load_state(state)
+      if value ~= "" then
+        state_led_levels[state] = 2
+      else
+        state_led_levels[state] = 0
+      end
+    end)
     params:hide("state_" .. state)
   end
 end
@@ -1411,6 +1436,7 @@ end
 
 -- Function to load a state
 function load_state(state)
+  print("Loading state ")
   local serialized = params:get("state_" .. state)
   if serialized ~= "" then
     local state_table = utils.deserialize_table(serialized)
@@ -1418,8 +1444,6 @@ function load_state(state)
       for voice = 1, VOICES do
         set_voice_params(voice, state_table[voice])
       end
-
-
       grid_refresh() -- Call grid_refresh to update the grid after loading the state
     end
   end
@@ -1430,7 +1454,7 @@ function gather_voice_params(voice)
     sample = params:get(voice .. "sample"),
     filter = params:get(voice .. "filter"),
     pan = params:get(voice .. "pan"),
-    play_stop = params:get(voice .. "play_stop"),
+    -- play_stop = params:get(voice .. "play_stop"),
     granular = params:get(voice .. "granular"),
     volume = params:get(voice .. "volume"),
     saturation = params:get(voice .. "saturation"),
@@ -1449,7 +1473,7 @@ function gather_voice_params(voice)
     attack = params:get(voice .. "attack"),
     sustain = params:get(voice .. "sustain"),
     release = params:get(voice .. "release"),
-    hold = params:get(voice .. "hold")
+    -- hold = params:get(voice .. "hold")
   }
 end
 
@@ -1458,7 +1482,7 @@ function set_voice_params(voice, params_table)
   params:set(voice .. "sample", params_table.sample)
   params:set(voice .. "filter", params_table.filter)
   params:set(voice .. "pan", params_table.pan)
-  params:set(voice .. "play_stop", params_table.play_stop)
+  -- params:set(voice .. "play_stop", params_table.play_stop)
   params:set(voice .. "granular", params_table.granular)
   params:set(voice .. "volume", params_table.volume)
   params:set(voice .. "saturation", params_table.saturation)
@@ -1477,5 +1501,5 @@ function set_voice_params(voice, params_table)
   params:set(voice .. "attack", params_table.attack)
   params:set(voice .. "sustain", params_table.sustain)
   params:set(voice .. "release", params_table.release)
-  params:set(voice .. "hold", params_table.hold)
+  -- params:set(voice .. "hold", params_table.hold)
 end

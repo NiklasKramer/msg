@@ -79,7 +79,7 @@ Engine_MSG : CroneEngine {
 			)];
 		});
 
-		SynthDef(\synth, {
+	SynthDef(\synth, {
 			arg out=0, phase_out=0, level_out=0, 
 			saturation_out=0, saturation_level=0, 
 			delay_out=0, delay_level=0, 
@@ -87,12 +87,12 @@ Engine_MSG : CroneEngine {
 			filterbank_out=0, filterbank_level=0, 
 			pan=0, buf1, buf2,
 			gate=0, pos=0, speed=1, jitter=0, fade=0.5,
-			size=0.1, density=20, finetune=1, semitones=0, spread=0, 
+			size=0.1, density=20, finetune=1, semitones=0, octaves=0, spread=0, 
 			gain=1, envscale=1, attack=1, sustain=1, release=1,
 			freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1, mute=1, fadeTime=0.1;
 			
 			var grain_trig, jitter_sig, buf_dur, pan_sig, buf_pos, pos_sig, sig, t_buf_pos_a, t_buf_pos_b, t_pos_sig;
-			var env, level, filtered, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, tremolo;
+			var env, level, filtered, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, tremolo, updated_semitones;
 			var buf_rd_left_a, buf_rd_right_a, buf_rd_left_b, buf_rd_right_b, aOrB, crossfade, reset_pos_a, reset_pos_b;
 			var jitter_lfo_freq, jitter_lfo_depth, jitter_lfo, jitter_rate, stereo_sig, pitch, semitones_in_hz, smooth_mute;
 			
@@ -111,7 +111,8 @@ Engine_MSG : CroneEngine {
 			crossfade = Lag.ar(K2A.ar(aOrB), fade);
 			reset_pos_a = Latch.kr(pos * BufFrames.kr(buf1), aOrB);
 			reset_pos_b = Latch.kr(pos * BufFrames.kr(buf1), 1 - aOrB);
-			semitones_in_hz = (2 ** (semitones / 12.0));
+			updated_semitones = octaves * 12 + semitones;
+			semitones_in_hz = (2 ** (updated_semitones / 12.0));
 
 			jitter_lfo_freq = LinLin.kr(jitter, 0, 1, 0.8, 25); 
 			jitter_lfo_depth = LinLin.kr(jitter, 0, 1, 0.0, 0.1);
@@ -180,6 +181,8 @@ Engine_MSG : CroneEngine {
 			Out.kr(phase_out, (Select.kr(useBufRd, [pos_sig, Select.kr(aOrB, [t_buf_pos_b, t_buf_pos_a]) / BufFrames.kr(buf1)]) * smooth_mute));
 			Out.kr(level_out, level * smooth_mute);
 		}).add;
+
+
 
 
 
@@ -513,6 +516,11 @@ Engine_MSG : CroneEngine {
 		this.addCommand("semitones", "if", { arg msg;
 			var voice = msg[1] - 1;
 			voices[voice].set(\semitones, msg[2]);
+		});
+
+		this.addCommand("octaves", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\octaves, msg[2]);
 		});
 
 		this.addCommand("filter", "if", { arg msg;
