@@ -23,7 +23,7 @@ local speed_display_values = { 0, 12.5, 25, 50, 100, 200, 400, 800 }
 
 -- Voice and control parameters
 local selected_voice = 1
-local VOICES = 10
+local VOICES = 8
 local RECORDER = 16
 local STATES = 16
 local current_screen = 1
@@ -149,6 +149,15 @@ function init()
     local grid_pattern_serialized = params:get("pattern_" .. i .. "_grid")
     local arc_pattern_serialized = params:get("pattern_" .. i .. "_arc")
     load_pattern_from_param(i, grid_pattern_serialized, arc_pattern_serialized)
+  end
+
+  for i = 1, STATES do
+    load_state(i)
+    if params:get("state_" .. i) ~= "" then
+      state_led_levels[i] = 2
+    else
+      state_led_levels[i] = 0
+    end
   end
 
   params:bang()
@@ -544,9 +553,11 @@ function grid_refresh()
   local hold = params:get(selected_voice .. "hold")
   local granular = params:get(selected_voice .. "granular")
   local mute = params:get(selected_voice .. "mute")
+  local record = params:get(selected_voice .. "record")
   grid_ctl:led_level_set(1, 15, hold == 0 and 12 or 5)
   grid_ctl:led_level_set(2, 15, granular == 0 and 12 or 5)
   grid_ctl:led_level_set(3, 15, mute == 1 and 12 or 5)
+  grid_ctl:led_level_set(4, 15, record == 1 and 15 or 8)
 
   for i = 1, STATES do
     grid_ctl:led_level_set(i, 14, state_led_levels[i])
@@ -608,6 +619,10 @@ function grid_key(x, y, z, skip_record)
         -- Toggle mute on/off
         local mute = params:get(selected_voice .. "mute")
         params:set(selected_voice .. "mute", mute == 0 and 1 or 0)
+      elseif x == 4 then
+        -- Toggle record on/off
+        local record = params:get(selected_voice .. "record")
+        params:set(selected_voice .. "record", record == 0 and 1 or 0)
       elseif x == 7 then
         -- Toggle between forward and reverse for speed
         local speed = params:get(selected_voice .. "speed") * -1
@@ -884,7 +899,7 @@ function init_params()
     params:add_separator("VOICE " .. v)
 
     -- Audio Parameters
-    params:add_group(v .. " AUDIO", 11)
+    params:add_group(v .. " AUDIO", 12)
 
     params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
     params:set_action(v .. "filter", function(value) engine.filter(v, value) end)
@@ -898,6 +913,11 @@ function init_params()
     params:add_binary(v .. "play_stop", v .. " play/stop", "toggle", 0)
     params:set_action(v .. "play_stop", function(value)
       if value == 1 then start_voice(v, positions[v]) else stop_voice(v) end
+    end)
+
+    params:add_binary(v .. "record", v .. " record", "toggle", 0)
+    params:set_action(v .. "record", function(value)
+      engine.record(v, value)
     end)
 
 
