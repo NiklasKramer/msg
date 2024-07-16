@@ -756,7 +756,7 @@ function init_params()
 
   -- Global Parameters
   params:add_separator("SAMPLES ")
-  params:add_group("SAMPLES", VOICES)
+  params:add_group("SAMPLES", 8)
 
   for v = 1, VOICES do
     params:add_file(v .. "sample", v .. " sample")
@@ -899,7 +899,7 @@ function init_params()
     params:add_separator("VOICE " .. v)
 
     -- Audio Parameters
-    params:add_group(v .. " AUDIO", 12)
+    params:add_group(v .. " AUDIO", 16)
 
     params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
     params:set_action(v .. "filter", function(value) engine.filter(v, value) end)
@@ -910,6 +910,9 @@ function init_params()
     params:add_binary(v .. "mute", v .. " mute", "toggle", 1)
     params:set_action(v .. "mute", function(value) engine.mute(v, value) end)
 
+    params:add_binary(v .. "granular", v .. " granular/buffer", "toggle", 0)
+    params:set_action(v .. "granular", function(value) engine.useBufRd(v, value) end)
+
     params:add_binary(v .. "play_stop", v .. " play/stop", "toggle", 0)
     params:set_action(v .. "play_stop", function(value)
       if value == 1 then start_voice(v, positions[v]) else stop_voice(v) end
@@ -917,13 +920,36 @@ function init_params()
 
     params:add_binary(v .. "record", v .. " record", "toggle", 0)
     params:set_action(v .. "record", function(value)
+      -- set granular mode to buffer mode
+      params:set(v .. "granular", 1)
       engine.record(v, value)
+    end)
+
+    params:add_separator("BUFFER LENGTH")
+
+    params:add_taper(v .. "buffer_length", v .. " buffer_length", 0.1, 60, 5, 0.1)
+    params:add_binary(v .. "update_buffer_length", v .. " update buffer length")
+
+    params:set_action(v .. "update_buffer_length",
+      function()
+        engine.buffer_length(v, params:get(v .. "buffer_length"))
+      end)
+
+    params:add_binary(v .. "save_buffer", v .. " save buffer")
+
+    params:set_action(v .. "save_buffer", function()
+      local timestamp = os.date("%Y%m%d%H%M%S")
+      local filepath = '/home/we/dust/audio/MSG/' .. timestamp .. 'buffer_' .. v .. '.wav'
+      print(filepath)
+      engine.save_buffer(v, filepath)
+
+      -- set sample of voice to the saved buffer
+      params:set(v .. "sample", filepath)
     end)
 
 
 
-    params:add_binary(v .. "granular", v .. " granular/buffer", "toggle", 0)
-    params:set_action(v .. "granular", function(value) engine.useBufRd(v, value) end)
+
 
 
     params:add_separator("LEVELS/SENDS")

@@ -61,6 +61,30 @@ Engine_MSG : CroneEngine {
 		});
 	}
 
+	setBufferLength { arg i, length;
+		if(buffers[i].notNil, {
+			buffers[i].do(_.free);
+			buffers[i] = [Buffer.alloc(context.server, context.server.sampleRate * length)];
+			voices[i].set(\buf1, buffers[i][0], \buf2, buffers[i][0]);
+		});
+	}
+
+	saveBuffer { arg i, path;
+		if(buffers[i].notNil, {
+			// Extract the directory from the path
+			// Create the directory if it doesn't exist
+			// Save the buffer to the specified path
+			buffers[i][0].write(path, "wav");
+		});
+	}
+
+	freeBuffer { arg i;
+		if(buffers[i].notNil, {
+			buffers[i].do(_.free);
+			buffers[i] = nil;
+		});
+	}
+
 	alloc {
 		~tf =  Env([-0.7, 0, 0.7], [1,1], [8,-8]).asSignal(1025);
 		~tf = ~tf + (
@@ -500,6 +524,18 @@ Engine_MSG : CroneEngine {
 				voices[voice].set(\t_reset_pos, 1);
 				voices[voice].set(\freeze, 0);
 			});
+		});
+
+		this.addCommand("buffer_length", "if", { arg msg;
+			this.setBufferLength(msg[1] - 1, msg[2]);
+		});
+
+		this.addCommand("free_buffer", "i", { arg msg;
+			this.freeBuffer(msg[1] - 1);
+		});
+
+		this.addCommand("save_buffer", "is", { arg msg;
+			this.saveBuffer(msg[1] - 1, msg[2]);
 		});
 
 		this.addCommand("gate", "ii", { arg msg;
