@@ -138,7 +138,9 @@ Engine_MSG : CroneEngine {
 
 			// Buffer reading control
 			aOrB = ToggleFF.kr(t_reset_pos);
-			crossfade = Lag.ar(K2A.ar(aOrB), fade);
+			// crossfade = Lag.ar(K2A.ar(aOrB), fade);
+			crossfade = K2A.ar(aOrB);
+
 			reset_pos_a = Latch.kr(pos * BufFrames.kr(buf1), aOrB);
 			reset_pos_b = Latch.kr(pos * BufFrames.kr(buf1), 1 - aOrB);
 			updated_semitones = octaves * 12 + semitones;
@@ -346,8 +348,9 @@ Engine_MSG : CroneEngine {
 		}).add;
 
 		SynthDef(\filterbank, {
-			arg out = 0, in = 0, amp = 1, gate = 1, spread = 1, q = 0.05, modRate = 0.2, depth = 0.5, qModRate = 0.1, qModDepth = 0.01, panModRate = 0.4, panModDepth = 1, wet = 1;
-			var freqs, source, drySignal, bands, modulations, ampMod, panMod, qMod, adjustedVolume, wetSignal;
+			arg out = 0, in = 0, amp = 1, gate = 1, spread = 1, q = 0.05, modRate = 0.2, depth = 0.5, qModRate = 0.1, qModDepth = 0.01, panModRate = 0.4, panModDepth = 1, wet = 1, 
+			reverb_out = 0, reverb_level=0, delay_out = 0, delay_level =0, saturation_out = 0, saturation_level = 0;
+			var freqs, source, drySignal, bands, modulations, ampMod, panMod, qMod, adjustedVolume, wetSignal, out_signal;
 
 			// Define the center frequencies of each band
 			freqs = [50, 125, 185, 270, 385, 540, 765, 1100, 1550, 2150, 3000, 4250, 6000, 8500, 12000, 17000];
@@ -385,9 +388,14 @@ Engine_MSG : CroneEngine {
 
 			// Apply amplitude envelope
 			wetSignal = bands * EnvGen.kr(Env.adsr, gate, doneAction: 2) * amp * adjustedVolume;
+			out_signal = XFade2.ar(drySignal, wetSignal, wet * 2 - 1);
 
 			// Mix dry and wet signals
-			Out.ar(out, XFade2.ar(drySignal, wetSignal, wet * 2 - 1));
+			Out.ar(out, out_signal);
+			Out.ar(reverb_out, out_signal * reverb_level);
+			Out.ar(delay_out, out_signal * delay_level);
+			Out.ar(saturation_out, out_signal * saturation_level);
+
 		}).add;
 
 		
@@ -409,7 +417,7 @@ Engine_MSG : CroneEngine {
 		reverb = Synth.new(\scverb_12, [\in, reverbBus, \out, context.out_b.index], target: context.xg);
 		delay = Synth.new(\td_22, [\in, delayBus, \out, context.out_b.index], target: context.xg);
         saturation = Synth.new(\saturator, [\in, saturationBus, \out, context.out_b.index], target: context.xg);
-		filterbank = Synth.new(\filterbank, [\in, filterbankBus, \out, context.out_b.index], target: context.xg);
+		filterbank = Synth.new(\filterbank, [\in, filterbankBus, \out, context.out_b.index, \reverb_out, reverbBus, \delay_out, delayBus, \saturation_out, saturationBus], target: context.xg);
 
 
 		phases = Array.fill(nvoices, { arg i; Bus.control(context.server); });
@@ -467,6 +475,8 @@ Engine_MSG : CroneEngine {
 
 		// FILTERBANK
 		this.addCommand("filterbank_amp", "f", { arg msg; filterbank.set(\amp, msg[1]); });
+		
+		// FILTERBANK
 		this.addCommand("filterbank_gate", "f", { arg msg; filterbank.set(\gate, msg[1]); });
 		this.addCommand("filterbank_spread", "f", { arg msg; filterbank.set(\spread, msg[1]); });
 		this.addCommand("filterbank_q", "f", { arg msg; filterbank.set(\q, msg[1]); });
@@ -477,6 +487,10 @@ Engine_MSG : CroneEngine {
 		this.addCommand("filterbank_panModRate", "f", { arg msg; filterbank.set(\panModRate, msg[1]); });
 		this.addCommand("filterbank_panModDepth", "f", { arg msg; filterbank.set(\panModDepth, msg[1]); });
 		this.addCommand("filterbank_wet", "f", { arg msg; filterbank.set(\wet, msg[1]); });
+		this.addCommand("filterbank_reverb_level", "f", { arg msg; filterbank.set(\reverb_level, msg[1]); });
+		this.addCommand("filterbank_delay_level", "f", { arg msg; filterbank.set(\delay_level, msg[1]); });
+		this.addCommand("filterbank_saturation_level", "f", { arg msg; filterbank.set(\saturation_level, msg[1]); });
+
 
 		
 		this.addCommand("read", "is", { arg msg;

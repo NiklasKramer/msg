@@ -24,7 +24,7 @@ local speed_display_values = { 0, 12.5, 25, 50, 100, 200, 400, 800 }
 -- Voice and control parameters
 local selected_voice = 1
 local VOICES = 8
-local RECORDER = 16
+local RECORDER = 18
 local STATES = 16
 local current_screen = 1
 
@@ -184,10 +184,23 @@ local function record_grid_event(x, y, z)
     end
 
     local time_delta = current_time - record_prevtime
-    table.insert(grid_pattern_banks[record_bank], { time_delta, 'grid', x, y, z })
+    local action_type = nil
+
+    if y == 15 and x > 5 then
+      action_type = 'control' -- Use a specific action type for the last two rows
+    elseif y == 16 and alt then
+      action_type = 'octaves'
+    elseif y == 16 then
+      action_type = 'semitone'
+    else
+      action_type = 'grid'
+    end
+
+    table.insert(grid_pattern_banks[record_bank], { time_delta, action_type, x, y, z, selected_voice })
     record_prevtime = current_time
   end
 end
+
 
 local function record_arc_event(n, d)
   local current_arc_params = {
@@ -292,6 +305,71 @@ function playback_arc_event(arc1_params, arc2_params, arc3_params, voice)
   if arc3_params[4] ~= nil then params:set(voice .. "delay", arc3_params[4]) end
 end
 
+local function playback_grid_event(event)
+  local delta, eventType, x, y, z, voice = table.unpack(event)
+
+  if eventType == 'grid' then
+    grid_key(x, y, z, true)
+  elseif eventType == 'control' then
+    -- Handle control actions based on the recorded voice and action
+    local original_voice = selected_voice
+    selected_voice = voice
+    if y == 15 then
+      if x == 1 then
+        local hold = params:get(selected_voice .. "hold")
+        params:set(selected_voice .. "hold", hold == 0 and 1 or 0)
+      elseif x == 2 then
+        local granular = params:get(selected_voice .. "granular")
+        params:set(selected_voice .. "granular", granular == 0 and 1 or 0)
+      elseif x == 3 then
+        local mute = params:get(selected_voice .. "mute")
+        params:set(selected_voice .. "mute", mute == 0 and 1 or 0)
+      elseif x == 5 then
+        local record = params:get(selected_voice .. "record")
+        params:set(selected_voice .. "record", record == 0 and 1 or 0)
+      elseif x == 7 then
+        local speed = params:get(selected_voice .. "speed") * -1
+        params:set(selected_voice .. "speed", speed)
+      else
+        local index = x - 8
+        if index >= 1 and index <= #speed_display_values then
+          local speed_value = speed_display_values[index]
+          local direction = params:get(selected_voice .. "speed") > 0 and 1 or -1
+          params:set(selected_voice .. "speed", speed_value * direction)
+        end
+      end
+    end
+    selected_voice = original_voice
+  elseif eventType == 'semitone' then
+    local original_voice = selected_voice
+    selected_voice = voice
+    local semitone_value
+    if x > 9 then
+      semitone_value = x - 9
+    elseif x == 9 or x == 8 then
+      semitone_value = 0
+    else
+      semitone_value = x - 8
+    end
+
+    params:set(selected_voice .. "semitones", semitone_value)
+    selected_voice = original_voice
+  elseif eventType == 'octaves' then
+    local original_voice = selected_voice
+    selected_voice = voice
+    local semitone_value
+    if x > 9 then
+      semitone_value = x - 9
+    elseif x == 9 or x == 8 then
+      semitone_value = 0
+    else
+      semitone_value = x - 8
+    end
+    params:set(selected_voice .. "octaves", semitone_value)
+    selected_voice = original_voice
+  end
+end
+
 local function pattern_next(n)
   local grid_bank = grid_pattern_banks[n]
   local arc_bank = arc_pattern_banks[n]
@@ -301,10 +379,7 @@ local function pattern_next(n)
   local arc_event = arc_bank and arc_bank[pos]
 
   if grid_event then
-    local delta, eventType, x, y, z = table.unpack(grid_event)
-    if eventType == 'grid' then
-      grid_key(x, y, z, true)
-    end
+    playback_grid_event(grid_event)
   elseif arc_event then
     local delta, eventType, arc1_params, arc2_params, arc3_params, voice = table.unpack(arc_event)
     if eventType == 'arc' then
@@ -326,6 +401,12 @@ local function pattern_next(n)
   end
   pattern_timers[n]:start(next_delta, 1)
 end
+
+
+
+
+
+
 
 local function handle_state_grid(x, z)
   if z == 1 then
@@ -424,7 +505,6 @@ local function start_voice(voice)
   gates[voice] = 1
   params:set(voice .. "play_stop", 1) -- Update the play/stop parameter
   arc_dirty = true
-  -- No need to update the position parameter here since we are using its current value
 end
 
 local function stop_voice(voice)
@@ -452,10 +532,11 @@ function grid_refresh()
     if i == selected_voice then
       voice_level = math.floor(swell)
     end
-    if i <= 5 then
+
+    if i <= 4 then
       grid_ctl:led_level_set(i, 1, voice_level)
     else
-      grid_ctl:led_level_set(i - 5, 2, voice_level)
+      grid_ctl:led_level_set(i - 4, 2, voice_level)
     end
   end
 
@@ -470,8 +551,8 @@ function grid_refresh()
         level = 15
       end
     end
-    local row = (i <= 8) and 1 or 2
-    local col = ((i - 1) % 8) + 7
+    local row = (i <= 9) and 1 or 2
+    local col = ((i - 1) % 9) + 6
     grid_ctl:led_level_set(col, row, level)
   end
 
@@ -484,17 +565,17 @@ function grid_refresh()
   end
 
   if record_bank > 0 then
-    local row = (record_bank <= 8) and 1 or 2
-    local col = ((record_bank - 1) % 8) + 7
+    local row = (record_bank <= 9) and 1 or 2
+    local col = ((record_bank - 1) % 9) + 6
     grid_ctl:led_level_set(col, row, 12 * blink)
   end
 
   for i = 1, VOICES do
     if voice_levels[i] > 0 then
-      if i <= 6 then
+      if i <= 4 then
         grid_voc:led_level_row(1, i + 2, display_voice(positions[i], 16))
       else
-        grid_voc:led_level_row(1, (i - 6) + 8, display_voice(positions[i], 16))
+        grid_voc:led_level_row(1, (i - 4) + 7, display_voice(positions[i], 16))
       end
     end
   end
@@ -547,8 +628,8 @@ function grid_refresh()
   end
   grid_ctl:led_level_set(9, 15, 1)
 
-  local speed_direction = params:get(selected_voice .. "speed") > 0 and 1 or -1
-  grid_ctl:led_level_set(7, 15, speed_direction == -1 and 12 or 5)
+  local speed_direction = params:get(selected_voice .. "speed") >= 0 and 1 or -1
+  grid_ctl:led_level_set(7, 15, speed_direction == -1 and 15 or 8)
 
   local hold = params:get(selected_voice .. "hold")
   local granular = params:get(selected_voice .. "granular")
@@ -557,7 +638,7 @@ function grid_refresh()
   grid_ctl:led_level_set(1, 15, hold == 0 and 12 or 5)
   grid_ctl:led_level_set(2, 15, granular == 0 and 12 or 5)
   grid_ctl:led_level_set(3, 15, mute == 1 and 12 or 5)
-  grid_ctl:led_level_set(4, 15, record == 1 and 15 or 8)
+  grid_ctl:led_level_set(5, 15, record == 1 and 15 or 2)
 
   for i = 1, STATES do
     grid_ctl:led_level_set(i, 14, state_led_levels[i])
@@ -570,7 +651,7 @@ end
 
 function grid_key(x, y, z, skip_record)
   -- Record grid events if necessary
-  if (y > 2 and y < 15) and not skip_record then
+  if (y > 2 and y < 17) and not skip_record then
     record_grid_event(x, y, z)
   end
 
@@ -619,7 +700,7 @@ function grid_key(x, y, z, skip_record)
         -- Toggle mute on/off
         local mute = params:get(selected_voice .. "mute")
         params:set(selected_voice .. "mute", mute == 0 and 1 or 0)
-      elseif x == 4 then
+      elseif x == 5 then
         -- Toggle record on/off
         local record = params:get(selected_voice .. "record")
         params:set(selected_voice .. "record", record == 0 and 1 or 0)
@@ -666,11 +747,11 @@ function topbar_key(x, y, z)
       -- Toggle arc screen mode
       selected_arc = selected_arc + 1
       if selected_arc > 3 then selected_arc = 1 end
-    elseif x >= 7 and x <= 14 then
+    elseif x >= 6 and x <= 14 then
       -- record handler
-      local recorder = (x - 7) + 8 * (y - 1) + 1
+      local recorder = (x - 6) + 9 * (y - 1) + 1
       record_handler(recorder)
-    elseif x <= 5 then
+    elseif x <= 4 then
       -- stop, only if alt is not pressed
       if alt then
         local voice = x + 5 * (y - 1)
@@ -678,7 +759,7 @@ function topbar_key(x, y, z)
         local hold = params:get(voice .. "hold")
         params:set(voice .. "hold", hold == 0 and 1 or 0)
       else
-        selected_voice = x + 5 * (y - 1)
+        selected_voice = x + 4 * (y - 1)
       end
     end
   end
@@ -855,7 +936,7 @@ function init_params()
 
 
   -- Group for Filterbank Parameters
-  params:add_group("FILTERBANK", 11)
+  params:add_group("FILTERBANK", 14)
 
   -- Filterbank Parameters
   params:add_taper("filterbank_amp", "*" .. sep .. "amp", 0, 1, 1, 0, "")
@@ -891,6 +972,15 @@ function init_params()
   params:add_taper("filterbank_wet", "*" .. sep .. "wet", 0, 1, 1, 0, "")
   params:set_action("filterbank_wet", function(value) engine.filterbank_wet(value) end)
 
+  params:add_taper("filterbank_reverb", "*" .. sep .. "reverb", 0, 1, 0, 0, "")
+  params:set_action("filterbank_reverb", function(value) engine.filterbank_reverb_level(value) end)
+
+  params:add_taper("filterbank_delay", "*" .. sep .. "delay", 0, 1, 0, 0, "")
+  params:set_action("filterbank_delay", function(value) engine.filterbank_delay_level(value) end)
+
+  params:add_taper("filterbank_saturation", "*" .. sep .. "saturation", 0, 1, 0, 0, "")
+  params:set_action("filterbank_saturation", function(value) engine.filterbank_saturation_level(value) end)
+
 
 
 
@@ -924,6 +1014,7 @@ function init_params()
       params:set(v .. "granular", 1)
       engine.record(v, value)
     end)
+
 
     params:add_separator("BUFFER LENGTH")
 
@@ -972,7 +1063,7 @@ function init_params()
     params:set_action(v .. "filterbank", function(value) engine.filterbank(v, math.pow(10, value / 20)) end)
 
     -- Granular Parameters
-    params:add_group(v .. " GRANULAR", 9)
+    params:add_group(v .. " GRANULAR", 10)
     params:add {
       type = "control",
       id = v .. "finetune",
@@ -988,6 +1079,9 @@ function init_params()
 
     params:add_number(v .. "octaves", v .. sep .. "octaves", min_octaves, max_octaves, 0)
     params:set_action(v .. "octaves", function(value) engine.octaves(v, math.floor(value + 0.5)) end)
+
+    params:add_taper(v .. "fade", v .. sep .. "fade", 0, 1, 0.1, 0)
+    params:set_action(v .. "fade", function(value) engine.fade(v, value) end)
 
 
     params:add_taper(v .. "speed", v .. sep .. "speed", min_speed, max_speed, 100, 0, "%")
@@ -1082,10 +1176,10 @@ function init_params()
   params:add_separator("")
   params:add_separator('header', 'ARC + General')
 
-  params:add_control("arc_sens_1", "Arc Sensitivity 1", controlspec.new(0.01, 2, 'lin', 0.01, 0.2))
-  params:add_control("arc_sens_2", "Arc Sensitivity 2", controlspec.new(0.01, 2, 'lin', 0.01, 0.2))
-  params:add_control("arc_sens_3", "Arc Sensitivity 3", controlspec.new(0.01, 2, 'lin', 0.01, 0.2))
-  params:add_control("arc_sens_4", "Arc Sensitivity 4", controlspec.new(0.01, 2, 'lin', 0.01, 0.2))
+  params:add_control("arc_sens_1", "Arc Sensitivity 1", controlspec.new(0.01, 2, 'lin', 0.01, 0.05))
+  params:add_control("arc_sens_2", "Arc Sensitivity 2", controlspec.new(0.01, 2, 'lin', 0.01, 0.05))
+  params:add_control("arc_sens_3", "Arc Sensitivity 3", controlspec.new(0.01, 2, 'lin', 0.01, 0.05))
+  params:add_control("arc_sens_4", "Arc Sensitivity 4", controlspec.new(0.01, 2, 'lin', 0.01, 0.05))
 
 
 
@@ -1286,7 +1380,7 @@ function redraw()
   -- Underline the track number if hold is off
   if params:get(selected_voice .. "hold") == 0 then
     local underline_start_x = track_number_x
-    local underline_end_x = track_number_x + 30
+    local underline_end_x = track_number_x + 20
     local underline_y = track_number_y + 4
     screen.move(underline_start_x, underline_y)
     screen.line(underline_end_x, underline_y)
@@ -1320,6 +1414,21 @@ function redraw()
   if params:get(selected_voice .. "mute") == 1 then
     screen.level(12)
     screen.rect(mute_state_x, mute_state_y, mute_box_size - 1, mute_box_size / 2 - 1)
+    screen.fill()
+  end
+
+  -- Display Record state with graphical representation
+  local record_state_x = mute_state_x + mute_box_size + 10
+  local record_state_y = mute_state_y + 2
+  local record_circle_radius = 3
+  screen.move(record_state_x, record_state_y)
+  if params:get(selected_voice .. "record") == 1 then
+    screen.level(15)
+    screen.circle(record_state_x, record_state_y, record_circle_radius)
+    screen.fill()
+  else
+    screen.level(2)
+    screen.circle(record_state_x, record_state_y, record_circle_radius)
     screen.fill()
   end
 
