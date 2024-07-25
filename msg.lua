@@ -20,6 +20,12 @@ local arc2_params = { "volume", "spread", "jitter", "filter" }
 local arc3_params = { "filterbank", "saturation", "reverb", "delay" }
 local speed_display_values = { 0, 12.5, 25, 50, 100, 200, 400, 800 }
 
+-- Global screen mode variable
+local screen_mode = 1
+local total_screens = 5
+
+-- Global variable to keep track of selected parameter index for each screen
+local selected_param = { 1, 1, 1, 1, 1 }
 
 -- Voice and control parameters
 local selected_voice = 1
@@ -27,6 +33,18 @@ local VOICES = 8
 local RECORDER = 18
 local STATES = 16
 local current_screen = 1
+
+-- Parameter lists for each screen
+local audio_params = { selected_voice .. "volume", selected_voice .. "pan", selected_voice .. "filterbank",
+  selected_voice ..
+  "saturation", selected_voice .. "reverb", selected_voice .. "delay" }
+local filterbank_params = { "filterbank_q", "filterbank_reverb", "filterbank_delay", "filterbank_saturation" }
+local saturation_params = { "saturation_depth", "saturation_rate", "crossover", "dist", "cutoff" }
+local delay_params = { "delay_time", "delay_feedback", "delay_lpf", "delay_hpf", "delay_w_depth" }
+local reverb_params = { "reverb_mix", "reverb_time", "reverb_lpf", "reverb_hpf", "reverb_srate" }
+
+
+
 
 -- Voice state tracking
 local positions = {}
@@ -1316,59 +1334,68 @@ end
 -- ENCODERS AND KEYS
 function enc(n, d)
   if n == 1 then
-    -- Change the selected voice
-    selected_voice = util.clamp(selected_voice + d, 1, VOICES)
-    arc_dirty = true
+    screen_mode = util.clamp(screen_mode + d, 1, total_screens)
   elseif n == 2 then
-    -- Parameter adjustments based on the current screen
-    if current_screen == 1 then
-      -- Adjusting 'filter' instead of 'volume'
-      params:delta(selected_voice .. "filter", d)
-    elseif current_screen == 2 then
-      params:delta(selected_voice .. "size", d)
-    elseif current_screen == 3 then
-      -- Wrapping around for position
-      local newPosition = positions[selected_voice] + (d / 100)
-      if newPosition > 1 then
-        newPosition = 0
-      elseif newPosition < 0 then
-        newPosition = 1
-      end
-      positions[selected_voice] = newPosition
-      params:set(selected_voice .. "position", newPosition)
-    end
+    selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1, #get_param_list(screen_mode))
   elseif n == 3 then
-    if current_screen == 1 then
-      -- Adjusting 'volume' here since it's now paired with 'filter'
-      params:delta(selected_voice .. "volume", d)
-    elseif current_screen == 2 then
-      params:delta(selected_voice .. "density", d)
-    elseif current_screen == 3 then
-      params:delta(selected_voice .. "speed", d)
-    end
+    local param_list = get_param_list(screen_mode)
+    params:delta(param_list[selected_param[screen_mode]], d)
   end
   redraw()
 end
 
-function key(n, z)
-  if n == 3 and z == 1 then
-    -- Toggle the screen
-    current_screen = (current_screen % 3) + 1
-    redraw()
-  elseif n == 2 and z == 1 then
-    -- Toggle play/stop for the selected voice
-    if gates[selected_voice] > 0 then
-      stop_voice(selected_voice)
-    else
-      start_voice(selected_voice)
-    end
+function get_param_list(screen_mode)
+  if screen_mode == 1 then
+    return { selected_voice .. "volume", selected_voice .. "pan", selected_voice .. "filterbank", selected_voice ..
+    "saturation",
+      selected_voice .. "reverb", selected_voice .. "delay" }
+  elseif screen_mode == 2 then
+    return filterbank_params
+  elseif screen_mode == 3 then
+    return saturation_params
+  elseif screen_mode == 4 then
+    return delay_params
+  elseif screen_mode == 5 then
+    return reverb_params
+  else
+    return {}
   end
+end
+
+function key(n, z)
+end
+
+function enc(n, d)
+  if n == 1 then
+    screen_mode = util.clamp(screen_mode + d, 1, total_screens)
+  elseif n == 2 then
+    selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1, #get_param_list(screen_mode))
+  elseif n == 3 then
+    local param_list = get_param_list(screen_mode)
+    params:delta(param_list[selected_param[screen_mode]], d)
+  end
+  redraw()
 end
 
 function redraw()
   screen.clear()
 
-  -- Display selected track number at the top with large font
+  if screen_mode == 1 then
+    redraw_screen_1()
+  elseif screen_mode == 2 then
+    redraw_screen_2()
+  elseif screen_mode == 3 then
+    redraw_screen_3()
+  elseif screen_mode == 4 then
+    redraw_screen_4()
+  elseif screen_mode == 5 then
+    redraw_screen_5()
+  end
+
+  screen.update()
+end
+
+function redraw_screen_1()
   local track_number_x = 0
   local track_number_y = 20
   screen.move(track_number_x, track_number_y)
@@ -1377,7 +1404,6 @@ function redraw()
   screen.text(string.format(selected_voice))
   screen.font_size(8)
 
-  -- Underline the track number if hold is off
   if params:get(selected_voice .. "hold") == 0 then
     local underline_start_x = track_number_x
     local underline_end_x = track_number_x + 20
@@ -1390,11 +1416,9 @@ function redraw()
 
   local hold_state_y = track_number_y + 20
 
-  -- Display Granular/Buffer mode with graphical representation
   local mode_y = hold_state_y
   screen.level(15)
   if params:get(selected_voice .. "granular") == 0 then
-    -- Draw particles for Granular mode
     for i = 1, 10 do
       local x = track_number_x + math.random(0, 10)
       local y = mode_y + math.random(-10, 10)
@@ -1403,7 +1427,6 @@ function redraw()
     screen.fill()
   end
 
-  -- Display Mute state with graphical representation
   local mute_state_y = mode_y + 18
   local mute_state_x = track_number_x + 1
   local mute_box_size = 10
@@ -1417,7 +1440,6 @@ function redraw()
     screen.fill()
   end
 
-  -- Display Record state with graphical representation
   local record_state_x = mute_state_x + mute_box_size + 10
   local record_state_y = mute_state_y + 2
   local record_circle_radius = 3
@@ -1432,39 +1454,83 @@ function redraw()
     screen.fill()
   end
 
-  -- Set the start position for parameter display
-  local param_y_start = 10
-  local param_x_start = 50
-  local line_spacing = 10
+  local param_list = get_param_list(1)
+  for i, param in ipairs(param_list) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[1] and 15 or 2)
+    -- filer out the voice number from the param name
+    local param_name = string.sub(param, 2)
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
+end
 
-  -- First pair: Filter and Volume
-  screen.move(param_x_start, param_y_start)
-  screen.level(current_screen == 1 and 15 or 2)
-  screen.text("Filter: " .. string.format("%.2f", params:get(selected_voice .. "filter")))
+function redraw_screen_2()
+  screen.move(0, 20)
+  screen.level(15)
+  screen.font_size(24)
+  screen.text("FB")
+  screen.font_size(8)
 
-  screen.move(param_x_start, param_y_start + line_spacing)
-  screen.level(current_screen == 1 and 15 or 2)
-  screen.text("Volume: " .. string.format("%.2f dB", params:get(selected_voice .. "volume")))
+  for i, param in ipairs(filterbank_params) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[2] and 15 or 2)
+    -- remove 'filterbank_' from the param name
+    param_name = string.sub(param, 12)
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
+end
 
-  -- Second pair: Size and Density
-  screen.move(param_x_start, param_y_start + 2 * line_spacing)
-  screen.level(current_screen == 2 and 15 or 2)
-  screen.text("Size: " .. string.format("%.2f ms", params:get(selected_voice .. "size")))
+function redraw_screen_3()
+  screen.move(0, 20)
+  screen.level(15)
+  screen.font_size(24)
+  screen.text("ST")
+  screen.font_size(8)
 
-  screen.move(param_x_start, param_y_start + 3 * line_spacing)
-  screen.level(current_screen == 2 and 15 or 2)
-  screen.text("Density: " .. string.format("%.2f Hz", params:get(selected_voice .. "density")))
+  for i, param in ipairs(saturation_params) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[3] and 15 or 2)
+    -- remove 'saturation_' from the param name
+    param_name = string.sub(param, 11)
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
+end
 
-  -- Third pair: Position and Speed
-  screen.move(param_x_start, param_y_start + 4 * line_spacing)
-  screen.level(current_screen == 3 and 15 or 2)
-  screen.text("Position: " .. string.format("%.2f", positions[selected_voice]))
+function redraw_screen_4()
+  screen.move(0, 20)
+  screen.level(15)
+  screen.font_size(24)
+  screen.text("DL")
+  screen.font_size(8)
 
-  screen.move(param_x_start, param_y_start + 5 * line_spacing)
-  screen.level(current_screen == 3 and 15 or 2)
-  screen.text("Speed: " .. string.format("%.2f%%", params:get(selected_voice .. "speed")))
+  for i, param in ipairs(delay_params) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[4] and 15 or 2)
+    -- remove 'delay_' from the param name
+    param_name = string.sub(param, 7)
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
+end
 
-  screen.update()
+function redraw_screen_5()
+  screen.move(0, 20)
+  screen.level(15)
+  screen.font_size(24)
+  screen.text("RE")
+  screen.font_size(8)
+
+  for i, param in ipairs(reverb_params) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[5] and 15 or 2)
+    -- remove 'reverb_' from the param name
+    param_name = string.sub(param, 8)
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
 end
 
 -- Setup LFOs for each voice
