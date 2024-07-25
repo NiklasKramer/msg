@@ -1493,9 +1493,7 @@ function redraw_screen_3()
     local y = 0 + i * 10
     screen.move(35, y)
     screen.level(i == selected_param[3] and 15 or 2)
-    -- remove 'saturation_' from the param name
-    param_name = string.sub(param, 11)
-    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+    screen.text(param .. ": " .. string.format("%.2f", params:get(param)))
   end
 end
 
