@@ -20,6 +20,13 @@ local arc2_params = { "volume", "spread", "jitter", "filter" }
 local arc3_params = { "filterbank", "saturation", "reverb", "delay" }
 local speed_display_values = { 0, 12.5, 25, 50, 100, 200, 400, 800 }
 
+-- Global screen mode variable
+local screen_mode = 1
+local total_screens = 5
+local screen_mode_b = false
+
+-- Global variable to keep track of selected parameter index for each screen
+local selected_param = { 1, 1, 1, 1, 1 }
 
 -- Voice and control parameters
 local selected_voice = 1
@@ -27,6 +34,29 @@ local VOICES = 8
 local RECORDER = 18
 local STATES = 16
 local current_screen = 1
+
+-- Parameter lists for each screen
+local audio_params = { selected_voice .. "volume", selected_voice .. "pan", selected_voice .. "filterbank",
+  selected_voice ..
+  "saturation", selected_voice .. "reverb", selected_voice .. "delay" }
+local filterbank_params = { "filterbank_q", "filterbank_reverb", "filterbank_delay", "filterbank_saturation" }
+local saturation_params = { "saturation_depth", "saturation_rate", "crossover", "dist", "cutoff" }
+local delay_params = { "delay_time", "delay_feedback", "delay_lpf", "delay_hpf", "delay_w_depth" }
+local reverb_params = { "reverb_mix", "reverb_time", "reverb_lpf", "reverb_hpf", "reverb_srate" }
+
+-- grid rows
+local control_row = 15
+local semitone_row = 16
+local state_row = 14
+local voices_start_row = 3  -- This assumes voices start from row 3, adjust as needed
+local top_row = 1           -- The top row, often used for special controls like `alt`
+local arc_selection_row = 2 -- Row for selecting arc modes
+local recorder_row_1 = 1    -- First row for recorders
+local recorder_row_2 = 2    -- Second row for recorders
+local number_of_rows = 16   -- Number of rows on the grid
+
+
+
 
 -- Voice state tracking
 local positions = {}
@@ -134,9 +164,25 @@ local LFO_TARGET_OPTIONS = {
   { "Pan",      LFO_TARGETS.PAN }
 }
 
-
+function init_grid_rows()
+  local rows = utils.check_grid_device(grid_device)
+  if rows == 8 then
+    control_row = 7
+    semitone_row = 8
+    state_row = 6
+    VOICES = 4
+    number_of_rows = 8
+  elseif rows == 16 then
+    control_row = 15
+    semitone_row = 16
+    state_row = 14
+    VOICES = 8
+    number_of_rows = 16
+  end
+end
 
 function init()
+  init_grid_rows()
   setup_grid_key()
   init_params()
   init_polls()
@@ -186,11 +232,11 @@ local function record_grid_event(x, y, z)
     local time_delta = current_time - record_prevtime
     local action_type = nil
 
-    if y == 15 and x > 5 then
-      action_type = 'control' -- Use a specific action type for the last two rows
-    elseif y == 16 and alt then
+    if y == control_row and x > 5 then
+      action_type = 'control' -- Use a specific action type for the control row
+    elseif y == semitone_row and alt then
       action_type = 'octaves'
-    elseif y == 16 then
+    elseif y == semitone_row then
       action_type = 'semitone'
     else
       action_type = 'grid'
@@ -200,6 +246,7 @@ local function record_grid_event(x, y, z)
     record_prevtime = current_time
   end
 end
+
 
 
 local function record_arc_event(n, d)
@@ -314,7 +361,7 @@ local function playback_grid_event(event)
     -- Handle control actions based on the recorded voice and action
     local original_voice = selected_voice
     selected_voice = voice
-    if y == 15 then
+    if y == control_row then
       if x == 1 then
         local hold = params:get(selected_voice .. "hold")
         params:set(selected_voice .. "hold", hold == 0 and 1 or 0)
@@ -357,18 +404,19 @@ local function playback_grid_event(event)
   elseif eventType == 'octaves' then
     local original_voice = selected_voice
     selected_voice = voice
-    local semitone_value
+    local octave_value
     if x > 9 then
-      semitone_value = x - 9
+      octave_value = x - 9
     elseif x == 9 or x == 8 then
-      semitone_value = 0
+      octave_value = 0
     else
-      semitone_value = x - 8
+      octave_value = x - 8
     end
-    params:set(selected_voice .. "octaves", semitone_value)
+    params:set(selected_voice .. "octaves", octave_value)
     selected_voice = original_voice
   end
 end
+
 
 local function pattern_next(n)
   local grid_bank = grid_pattern_banks[n]
@@ -403,11 +451,6 @@ local function pattern_next(n)
 end
 
 
-
-
-
-
-
 local function handle_state_grid(x, z)
   if z == 1 then
     if alt then
@@ -436,6 +479,7 @@ local function handle_state_grid(x, z)
     end
   end
 end
+
 
 local function record_handler(n)
   if alt then
@@ -522,7 +566,7 @@ function grid_refresh()
   grid_ctl:led_level_all(0)
   grid_voc:led_level_all(0)
 
-  grid_ctl:led_level_set(16, 1, alt and 15 or 8)
+  grid_ctl:led_level_set(16, top_row, alt and 15 or 8)
 
   for i = 1, VOICES do
     local voice_level = 1
@@ -534,9 +578,9 @@ function grid_refresh()
     end
 
     if i <= 4 then
-      grid_ctl:led_level_set(i, 1, voice_level)
+      grid_ctl:led_level_set(i, voices_start_row - 2, voice_level)
     else
-      grid_ctl:led_level_set(i - 4, 2, voice_level)
+      grid_ctl:led_level_set(i - 4, voices_start_row - 1, voice_level)
     end
   end
 
@@ -551,32 +595,28 @@ function grid_refresh()
         level = 15
       end
     end
-    local row = (i <= 9) and 1 or 2
+    local row = (i <= 9) and recorder_row_1 or recorder_row_2
     local col = ((i - 1) % 9) + 6
     grid_ctl:led_level_set(col, row, level)
   end
 
   if selected_arc == 1 then
-    grid_ctl:led_level_set(16, 2, 1)
+    grid_ctl:led_level_set(16, arc_selection_row, 1)
   elseif selected_arc == 2 then
-    grid_ctl:led_level_set(16, 2, 9)
+    grid_ctl:led_level_set(16, arc_selection_row, 9)
   elseif selected_arc == 3 then
-    grid_ctl:led_level_set(16, 2, 15)
+    grid_ctl:led_level_set(16, arc_selection_row, 15)
   end
 
   if record_bank > 0 then
-    local row = (record_bank <= 9) and 1 or 2
+    local row = (record_bank <= 9) and recorder_row_1 or recorder_row_2
     local col = ((record_bank - 1) % 9) + 6
     grid_ctl:led_level_set(col, row, 12 * blink)
   end
 
   for i = 1, VOICES do
     if voice_levels[i] > 0 then
-      if i <= 4 then
-        grid_voc:led_level_row(1, i + 2, display_voice(positions[i], 16))
-      else
-        grid_voc:led_level_row(1, (i - 4) + 7, display_voice(positions[i], 16))
-      end
+      grid_voc:led_level_row(1, i + voices_start_row - 1, display_voice(positions[i], 16))
     end
   end
 
@@ -591,15 +631,15 @@ function grid_refresh()
     if col == 8 or col == 9 then
       level = 5
     end
-    grid_ctl:led_level_set(col, 16, level)
+    grid_ctl:led_level_set(col, semitone_row, level)
   end
   if value < 0 and value > -8 then
-    grid_ctl:led_level_set(value + 8, 16, 15)
+    grid_ctl:led_level_set(value + 8, semitone_row, 15)
   elseif value > 0 and value < 8 then
-    grid_ctl:led_level_set(value + 9, 16, 15)
+    grid_ctl:led_level_set(value + 9, semitone_row, 15)
   elseif value == 0 then
-    grid_ctl:led_level_set(8, 16, 15)
-    grid_ctl:led_level_set(9, 16, 15)
+    grid_ctl:led_level_set(8, semitone_row, 15)
+    grid_ctl:led_level_set(9, semitone_row, 15)
   end
 
   local speed = params:get(selected_voice .. "speed")
@@ -621,28 +661,24 @@ function grid_refresh()
   for i, value in ipairs(speed_display_values) do
     local col = i + 8
     local level = calculate_brightness(math.abs(speed), value)
-    grid_ctl:led_level_set(col, 15, level)
+    grid_ctl:led_level_set(col, control_row, level)
   end
   if math.abs(speed) < 100 then
-    grid_ctl:led_level_set(13, 15, 1)
+    grid_ctl:led_level_set(13, control_row, 1)
   end
-  grid_ctl:led_level_set(9, 15, 1)
+  grid_ctl:led_level_set(9, control_row, 1)
 
   local speed_direction = params:get(selected_voice .. "speed") >= 0 and 1 or -1
-  grid_ctl:led_level_set(7, 15, speed_direction == -1 and 15 or 8)
+  grid_ctl:led_level_set(7, control_row, speed_direction == -1 and 15 or 8)
 
   local hold = params:get(selected_voice .. "hold")
   local granular = params:get(selected_voice .. "granular")
   local mute = params:get(selected_voice .. "mute")
   local record = params:get(selected_voice .. "record")
-  grid_ctl:led_level_set(1, 15, hold == 0 and 12 or 5)
-  grid_ctl:led_level_set(2, 15, granular == 0 and 12 or 5)
-  grid_ctl:led_level_set(3, 15, mute == 1 and 12 or 5)
-  grid_ctl:led_level_set(5, 15, record == 1 and 15 or 2)
-
-  for i = 1, STATES do
-    grid_ctl:led_level_set(i, 14, state_led_levels[i])
-  end
+  grid_ctl:led_level_set(1, control_row, hold == 0 and 12 or 5)
+  grid_ctl:led_level_set(2, control_row, granular == 0 and 12 or 5)
+  grid_ctl:led_level_set(3, control_row, mute == 1 and 12 or 5)
+  grid_ctl:led_level_set(5, control_row, record == 1 and 15 or 2)
 
   local buf = grid_ctl | grid_voc
   buf:render(grid_device)
@@ -650,17 +686,14 @@ function grid_refresh()
 end
 
 function grid_key(x, y, z, skip_record)
-  -- Record grid events if necessary
-  if (y > 2 and y < 17) and not skip_record then
+  if (y >= voices_start_row and y < control_row) and not skip_record then
     record_grid_event(x, y, z)
   end
 
-  if y == 14 then
-    handle_state_grid(x, z)
-  elseif z == 1 then
-    if y > 2 and y < 15 then
+  if z == 1 then
+    if y >= voices_start_row and y < control_row then
       -- Handle voice triggering and positioning
-      local voice = y - 2
+      local voice = y - (voices_start_row - 1)
       local new_position = (x - 1) / 16
 
       if alt and gates[voice] > 0 then
@@ -672,7 +705,7 @@ function grid_key(x, y, z, skip_record)
         params:set(voice .. "position", new_position)
         start_voice(voice)
       end
-    elseif y == 16 then
+    elseif y == semitone_row then
       -- Handle semitone changes on the last row
       local semitone_value
       if x > 9 then
@@ -687,7 +720,8 @@ function grid_key(x, y, z, skip_record)
       else
         params:set(selected_voice .. "semitones", semitone_value)
       end
-    elseif y == 15 then
+    elseif y == control_row then
+      -- Handle controls on the control row
       if x == 1 then
         -- Toggle hold on/off
         local hold = params:get(selected_voice .. "hold")
@@ -721,16 +755,16 @@ function grid_key(x, y, z, skip_record)
       topbar_key(x, y, z)
     end
   else
-    if y > 2 and y < 15 then
+    if y >= voices_start_row and y < control_row then
       -- Stop voice if hold is not active
-      local voice = y - 2
+      local voice = y - (voices_start_row - 1)
       if params:get(voice .. "hold") == 0 then
         stop_voice(voice)
       end
     end
 
     -- Release alt if necessary
-    if x == 16 and y == 1 then
+    if x == 16 and y == top_row then
       alt = false
     end
   end
@@ -739,11 +773,11 @@ function grid_key(x, y, z, skip_record)
 end
 
 function topbar_key(x, y, z)
-  if y == 1 or y == 2 then
-    if x == 16 and y == 1 then
+  if y == top_row or y == arc_selection_row then
+    if x == 16 and y == top_row then
       -- alt
       alt = z == 1
-    elseif x == 16 and y == 2 then
+    elseif x == 16 and y == arc_selection_row then
       -- Toggle arc screen mode
       selected_arc = selected_arc + 1
       if selected_arc > 3 then selected_arc = 1 end
@@ -751,15 +785,20 @@ function topbar_key(x, y, z)
       -- record handler
       local recorder = (x - 6) + 9 * (y - 1) + 1
       record_handler(recorder)
-    elseif x <= 4 then
+    elseif x <= (VOICES <= 4 and 4 or 8) then
       -- stop, only if alt is not pressed
       if alt then
-        local voice = x + 5 * (y - 1)
-        --toggle hold for voice
+        local voice = x + 4 * (y - 1)
+        -- toggle hold for voice
         local hold = params:get(voice .. "hold")
         params:set(voice .. "hold", hold == 0 and 1 or 0)
       else
-        selected_voice = x + 4 * (y - 1)
+        -- adjust voice selection depending on the number of voices
+        if VOICES <= 4 then
+          selected_voice = x
+        else
+          selected_voice = x + 4 * (y - 1)
+        end
       end
     end
   end
@@ -832,19 +871,40 @@ function setup_recorders()
   end
 end
 
+--INIT PARAMS
 function init_params()
-  local sep = ": "
+  init_sample_params()
+  init_buffers_for_voice()
+  init_saturation_params()
+  init_delay_params()
+  init_reverb_params()
+  init_filterbank_params()
+  init_voice_params()
+  init_global_and_hidden_params()
+end
 
-  -- Global Parameters
-  params:add_separator("SAMPLES ")
-  params:add_group("SAMPLES", 8)
+function init_sample_params()
+  params:add_separator("SAMPLES")
+  params:add_group("SAMPLES", VOICES)
 
   for v = 1, VOICES do
     params:add_file(v .. "sample", v .. " sample")
     params:set_action(v .. "sample", function(file) engine.read(v, file) end)
   end
+end
 
-  params:add_separator("Sends")
+function init_buffers_for_voice()
+  params:add_separator("BUFFER")
+  params:add_group("SELECT BUFFER", VOICES)
+
+  for v = 1, VOICES do
+    params:add_number(v .. "selected_buffer", v .. " buffer", 1, VOICES, v)
+    params:set_action(v .. "selected_buffer", function(value) engine.set_buffer_for_voice(v, value) end)
+  end
+end
+
+function init_saturation_params()
+  params:add_separator("SATURATION")
   params:add_group("SATURATION", 9)
 
   params:add_taper("saturation_depth", "saturation_depth", 1, 32, 32, 0)
@@ -873,11 +933,12 @@ function init_params()
 
   params:add_taper('output_volume', 'output_volume', 0, 1, 1, 0)
   params:set_action('output_volume', function(value) engine.saturation_volume(value) end)
+end
 
-
+function init_delay_params()
+  params:add_separator("DELAY")
   params:add_group("DELAY", 9)
 
-  --delay_delay
   params:add_taper('delay_time', 'delay', 0.001, 2, 0.2, 0)
   params:set_action('delay_time', function(value) engine.delay_delay(value) end)
 
@@ -887,292 +948,91 @@ function init_params()
   params:add_taper('delay_mix', 'delay_mix', 0, 1, 1, 0)
   params:set_action('delay_mix', function(value) engine.delay_mix(value) end)
 
-  --delay_lpf
   params:add_taper('delay_lpf', 'delay_lpf', 20, 20000, 20000, 0)
   params:set_action('delay_lpf', function(value) engine.delay_lpf(value) end)
 
-  --delay_hpf
   params:add_taper('delay_hpf', 'delay_hpf', 20, 20000, 20, 0)
   params:set_action('delay_hpf', function(value) engine.delay_hpf(value) end)
 
-  --delay_w_rate
   params:add_taper('delay_w_rate', 'delay_w_rate', 0.1, 10, 1, 0)
   params:set_action('delay_w_rate', function(value) engine.delay_w_rate(value) end)
 
-  --delay_w_depth
   params:add_taper('delay_w_depth', 'delay_w_depth', 0, 1, 0, 0)
   params:set_action('delay_w_depth', function(value) engine.delay_w_depth(value / 100) end)
 
-  --delay_rotate
   params:add_taper('delay_rotate', 'delay_rotate', 0, 1, 0.5, 0)
   params:set_action('delay_rotate', function(value) engine.delay_rotate(value) end)
 
-  --delay_max_del
   params:add_taper('delay_max_del', 'delay_max_del', 0.0, 10, 1, 0)
   params:set_action('delay_max_del', function(value) engine.delay_max_del(value) end)
+end
 
-
-
-
-
+function init_reverb_params()
   params:add_group("REVERB", 5)
 
-  -- Reverb Parameters
-  params:add_taper("reverb_mix", "*" .. sep .. "mix", 0, 100, 100, 0, "%")
+  params:add_taper("reverb_mix", "*: mix", 0, 100, 100, 0, "%")
   params:set_action("reverb_mix", function(value) engine.reverb_mix(value / 100) end)
 
-  params:add_taper("reverb_time", "*" .. sep .. "time", 0.1, 15, 4, 0, "s")
+  params:add_taper("reverb_time", "*: time", 0.1, 15, 4, 0, "s")
   params:set_action("reverb_time", function(value) engine.reverb_time(value) end)
 
-  params:add_taper("reverb_lpf", "*" .. sep .. "lpf", 20, 20000, 20000, 0, "hz")
+  params:add_taper("reverb_lpf", "*: lpf", 20, 20000, 20000, 0, "hz")
   params:set_action("reverb_lpf", function(value) engine.reverb_lpf(value) end)
 
-  params:add_taper("reverb_hpf", "*" .. sep .. "hpf", 20, 20000, 150, 0, "hz")
+  params:add_taper("reverb_hpf", "*: hpf", 20, 20000, 150, 0, "hz")
   params:set_action("reverb_hpf", function(value) engine.reverb_hpf(value) end)
 
-  params:add_taper("reverb_srate", "*" .. sep .. "srate", 0.1, 10, 1, 0, "s")
+  params:add_taper("reverb_srate", "*: srate", 0.1, 10, 1, 0, "s")
   params:set_action("reverb_srate", function(value) engine.reverb_srate(value) end)
+end
 
-
-
-  -- Group for Filterbank Parameters
+function init_filterbank_params()
   params:add_group("FILTERBANK", 14)
 
-  -- Filterbank Parameters
-  params:add_taper("filterbank_amp", "*" .. sep .. "amp", 0, 1, 1, 0, "")
+  params:add_taper("filterbank_amp", "*: amp", 0, 1, 1, 0, "")
   params:set_action("filterbank_amp", function(value) engine.filterbank_amp(value) end)
 
-  params:add_taper("filterbank_gate", "*" .. sep .. "gate", 0, 1, 1, 0, "")
+  params:add_taper("filterbank_gate", "*: gate", 0, 1, 1, 0, "")
   params:set_action("filterbank_gate", function(value) engine.filterbank_gate(value) end)
 
-  params:add_taper("filterbank_spread", "*" .. sep .. "spread", 0, 1, 1, 0, "")
+  params:add_taper("filterbank_spread", "*: spread", 0, 1, 1, 0, "")
   params:set_action("filterbank_spread", function(value) engine.filterbank_spread(value) end)
 
-  params:add_taper("filterbank_q", "*" .. sep .. "q", 0.0001, 1, 0.1, 0, "")
+  params:add_taper("filterbank_q", "*: q", 0.0001, 1, 0.1, 0, "")
   params:set_action("filterbank_q", function(value) engine.filterbank_q(value) end)
 
-  params:add_taper("filterbank_modRate", "*" .. sep .. "modRate", 0.1, 10, 0.2, 0, "")
+  params:add_taper("filterbank_modRate", "*: modRate", 0.1, 10, 0.2, 0, "")
   params:set_action("filterbank_modRate", function(value) engine.filterbank_modRate(value) end)
 
-  params:add_taper("filterbank_depth", "*" .. sep .. "depth", 0, 1, 0.5, 0, "")
+  params:add_taper("filterbank_depth", "*: depth", 0, 1, 0.5, 0, "")
   params:set_action("filterbank_depth", function(value) engine.filterbank_depth(value) end)
 
-  params:add_taper("filterbank_qModRate", "*" .. sep .. "qModRate", 0.1, 10, 0.1, 0, "")
+  params:add_taper("filterbank_qModRate", "*: qModRate", 0.1, 10, 0.1, 0, "")
   params:set_action("filterbank_qModRate", function(value) engine.filterbank_qModRate(value) end)
 
-  params:add_taper("filterbank_qModDepth", "*" .. sep .. "qModDepth", 0, 1, 0.01, 0, "")
+  params:add_taper("filterbank_qModDepth", "*: qModDepth", 0, 1, 0.01, 0, "")
   params:set_action("filterbank_qModDepth", function(value) engine.filterbank_qModDepth(value) end)
 
-  params:add_taper("filterbank_panModRate", "*" .. sep .. "panModRate", 0.1, 10, 0.4, 0, "")
+  params:add_taper("filterbank_panModRate", "*: panModRate", 0.1, 10, 0.4, 0, "")
   params:set_action("filterbank_panModRate", function(value) engine.filterbank_panModRate(value) end)
 
-  params:add_taper("filterbank_panModDepth", "*" .. sep .. "panModDepth", 0, 1, 1, 0, "")
+  params:add_taper("filterbank_panModDepth", "*: panModDepth", 0, 1, 1, 0, "")
   params:set_action("filterbank_panModDepth", function(value) engine.filterbank_panModDepth(value) end)
 
-  params:add_taper("filterbank_wet", "*" .. sep .. "wet", 0, 1, 1, 0, "")
+  params:add_taper("filterbank_wet", "*: wet", 0, 1, 1, 0, "")
   params:set_action("filterbank_wet", function(value) engine.filterbank_wet(value) end)
 
-  params:add_taper("filterbank_reverb", "*" .. sep .. "reverb", 0, 1, 0, 0, "")
+  params:add_taper("filterbank_reverb", "*: reverb", 0, 1, 0, 0, "")
   params:set_action("filterbank_reverb", function(value) engine.filterbank_reverb_level(value) end)
 
-  params:add_taper("filterbank_delay", "*" .. sep .. "delay", 0, 1, 0, 0, "")
+  params:add_taper("filterbank_delay", "*: delay", 0, 1, 0, 0, "")
   params:set_action("filterbank_delay", function(value) engine.filterbank_delay_level(value) end)
 
-  params:add_taper("filterbank_saturation", "*" .. sep .. "saturation", 0, 1, 0, 0, "")
+  params:add_taper("filterbank_saturation", "*: saturation", 0, 1, 0, 0, "")
   params:set_action("filterbank_saturation", function(value) engine.filterbank_saturation_level(value) end)
+end
 
-
-
-
-  -- Voice Parameters
-  for v = 1, VOICES do
-    params:add_separator("VOICE " .. v)
-
-    -- Audio Parameters
-    params:add_group(v .. " AUDIO", 16)
-
-    params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
-    params:set_action(v .. "filter", function(value) engine.filter(v, value) end)
-
-    params:add_taper(v .. "pan", v .. " pan", -1, 1, 0, 0)
-    params:set_action(v .. "pan", function(value) engine.pan(v, value) end)
-
-    params:add_binary(v .. "mute", v .. " mute", "toggle", 1)
-    params:set_action(v .. "mute", function(value) engine.mute(v, value) end)
-
-    params:add_binary(v .. "granular", v .. " granular/buffer", "toggle", 0)
-    params:set_action(v .. "granular", function(value) engine.useBufRd(v, value) end)
-
-    params:add_binary(v .. "play_stop", v .. " play/stop", "toggle", 0)
-    params:set_action(v .. "play_stop", function(value)
-      if value == 1 then start_voice(v, positions[v]) else stop_voice(v) end
-    end)
-
-    params:add_binary(v .. "record", v .. " record", "toggle", 0)
-    params:set_action(v .. "record", function(value)
-      -- set granular mode to buffer mode
-      params:set(v .. "granular", 1)
-      engine.record(v, value)
-    end)
-
-
-    params:add_separator("BUFFER LENGTH")
-
-    params:add_taper(v .. "buffer_length", v .. " buffer_length", 0.1, 60, 5, 0.1)
-    params:add_binary(v .. "update_buffer_length", v .. " update buffer length")
-
-    params:set_action(v .. "update_buffer_length",
-      function()
-        engine.buffer_length(v, params:get(v .. "buffer_length"))
-      end)
-
-    params:add_binary(v .. "save_buffer", v .. " save buffer")
-
-    params:set_action(v .. "save_buffer", function()
-      local timestamp = os.date("%Y%m%d%H%M%S")
-      local filepath = '/home/we/dust/audio/MSG/' .. timestamp .. 'buffer_' .. v .. '.wav'
-      print(filepath)
-      engine.save_buffer(v, filepath)
-
-      -- set sample of voice to the saved buffer
-      params:set(v .. "sample", filepath)
-    end)
-
-
-
-
-
-
-    params:add_separator("LEVELS/SENDS")
-
-    params:add_taper(v .. "volume", v .. " volume", min_volume, max_volume, 0, 0, "dB")
-    params:set_action(v .. "volume", function(value) engine.volume(v, math.pow(10, value / 20)) end)
-
-    params:add_taper(v .. "saturation", v .. " saturation", min_saturation_send, max_saturation_send, min_delay_send, 0,
-      "dB")
-    params:set_action(v .. "saturation", function(value) engine.saturation(v, math.pow(10, value / 20)) end)
-
-    params:add_taper(v .. "delay", v .. " delay", min_delay_send, max_delay_send, min_delay_send, 0, "dB")
-    params:set_action(v .. "delay", function(value) engine.delay(v, math.pow(10, value / 20)) end)
-
-    params:add_taper(v .. "reverb", v .. " reverb", min_reverb_send, max_reverb_send, min_delay_send, 0, "dB")
-    params:set_action(v .. "reverb", function(value) engine.reverb(v, math.pow(10, value / 20)) end)
-
-    params:add_taper(v .. "filterbank", v .. " filterbank", min_filterbank_send, max_filterbank_send, min_delay_send, 0,
-      "dB")
-    params:set_action(v .. "filterbank", function(value) engine.filterbank(v, math.pow(10, value / 20)) end)
-
-    -- Granular Parameters
-    params:add_group(v .. " GRANULAR", 10)
-    params:add {
-      type = "control",
-      id = v .. "finetune",
-      name = v .. ": finetune",
-      controlspec = controlspec.new(0, 4, "lin", 0.001, 1, "", 0.001),
-      action = function(value)
-        engine.finetune(v, value)
-      end
-    }
-
-    params:add_number(v .. "semitones", v .. sep .. "semitones", min_semitones, max_semitones, 0)
-    params:set_action(v .. "semitones", function(value) engine.semitones(v, math.floor(value + 0.5)) end)
-
-    params:add_number(v .. "octaves", v .. sep .. "octaves", min_octaves, max_octaves, 0)
-    params:set_action(v .. "octaves", function(value) engine.octaves(v, math.floor(value + 0.5)) end)
-
-    params:add_taper(v .. "fade", v .. sep .. "fade", 0, 1, 0.1, 0)
-    params:set_action(v .. "fade", function(value) engine.fade(v, value) end)
-
-
-    params:add_taper(v .. "speed", v .. sep .. "speed", min_speed, max_speed, 100, 0, "%")
-    params:set_action(v .. "speed", function(value)
-      local actual_speed = util.clamp(value, min_speed, max_speed)
-      engine.speed(v, actual_speed / 100)
-    end)
-
-
-
-    -- Voice Position
-    params:add {
-      type = "control",
-      id = v .. "position",
-      name = v .. sep .. "position",
-      controlspec = controlspec.new(0, 1, "lin", 0, 0, ""),
-      action = function(value)
-        local actual_position = util.clamp(value, 0, 1)
-        positions[v] = actual_position
-        if gates[v] > 0 then
-          engine.seek(v, actual_position)
-        end
-      end
-    }
-
-    params:add_taper(v .. "jitter", v .. sep .. "jitter", min_jitter, max_jitter, 0, 5, "ms")
-    params:set_action(v .. "jitter", function(value) engine.jitter(v, value / 1000) end)
-
-    params:add_taper(v .. "size", v .. sep .. "size", min_size, max_size, 100, 5, "ms")
-    params:set_action(v .. "size", function(value) engine.size(v, value / 1000) end)
-
-    params:add_taper(v .. "density", v .. sep .. "density", min_density, max_density, 20, 6, "hz")
-    params:set_action(v .. "density", function(value) engine.density(v, value) end)
-
-    params:add_taper(v .. "spread", v .. sep .. "spread", 0, 100, 0, 0, "%")
-    params:set_action(v .. "spread", function(value) engine.spread(v, value / 100) end)
-
-
-    params:add_group(v .. " ENV", 5)
-
-    params:add_taper(v .. "fade", v .. sep .. "att / dec", 0, 9000, 1000, 0, "ms")
-    params:set_action(v .. "fade", function(value) engine.envscale(v, value / 1000) end)
-
-    params:add_taper(v .. "attack", v .. sep .. "attack", 0, 10, 1, 0)
-    params:set_action(v .. "attack", function(value) engine.attack(v, value) end)
-
-    params:add_taper(v .. "sustain", v .. sep .. "sustain", 0, 10, 1, 0)
-    params:set_action(v .. "sustain", function(value) engine.sustain(v, value) end)
-
-    params:add_taper(v .. "release", v .. sep .. "release", 0, 10, 1, 0)
-    params:set_action(v .. "release", function(value) engine.release(v, value) end)
-
-    -- add param called hold, that can be on or off (0 or 1)
-    params:add_binary(v .. "hold", v .. sep .. "hold", "toggle", 1)
-
-
-    -- LFO Parameters
-    for lfo_num = 1, 4 do
-      local lfo_id = v .. "_lfo" .. lfo_num
-
-      -- LFO Group
-      params:add_group(v .. " LFO " .. lfo_num, 5)
-
-      -- Rate
-      params:add_taper(lfo_id .. "_rate", "LFO " .. lfo_num .. " rate", 0.001, 20, 0.5, 0, "Sec")
-      params:set_action(lfo_id .. "_rate", function(value)
-        lfos[v][lfo_num]:set('period', value)
-      end)
-
-      -- Depth
-      params:add_taper(lfo_id .. "_depth", "LFO " .. lfo_num .. " depth", 0, 1, 0.5, 0)
-      params:set_action(lfo_id .. "_depth", function(value)
-        lfos[v][lfo_num]:set('depth', value)
-      end)
-
-      -- Enable
-      params:add_binary(lfo_id .. "_enable", "LFO " .. lfo_num .. " enable", "toggle", 0)
-      params:set_action(lfo_id .. "_enable", function(value)
-        if value == 1 then lfos[v][lfo_num]:start() else lfos[v][lfo_num]:stop() end
-      end)
-
-      add_lfo_target_param(v, lfo_num)
-
-      -- Offset
-      params:add_taper(lfo_id .. "_offset", "LFO " .. lfo_num .. " Offset", -1, 1, 0, 0)
-      params:set_action(lfo_id .. "_offset", function(value)
-        lfos[v][lfo_num]:set('offset', value)
-      end)
-    end
-  end
-
+function init_global_and_hidden_params()
   params:add_separator("")
   params:add_separator('header', 'ARC + General')
 
@@ -1181,11 +1041,9 @@ function init_params()
   params:add_control("arc_sens_3", "Arc Sensitivity 3", controlspec.new(0.01, 2, 'lin', 0.01, 0.05))
   params:add_control("arc_sens_4", "Arc Sensitivity 4", controlspec.new(0.01, 2, 'lin', 0.01, 0.05))
 
-
-
-  -- HIDDEN params
+  -- Hidden params
   for v = 1, VOICES do
-    params:add_number(v .. "semitones_precise", v .. sep .. "semitones_precise", min_semitones, max_semitones, 0)
+    params:add_number(v .. "semitones_precise", v .. ": semitones_precise", min_semitones, max_semitones, 0)
     params:hide(v .. "semitones_precise")
   end
 
@@ -1201,7 +1059,6 @@ function init_params()
       load_pattern_from_param(i, params:get("pattern_" .. i .. "_grid"), value)
     end)
   end
-
 
   for state = 1, 16 do
     params:add_text("state_" .. state, "State " .. state, "")
@@ -1228,6 +1085,175 @@ function add_lfo_target_param(voice, lfo_num)
   params:set_action(param_id, function(value)
     update_lfo_ranges()
   end)
+end
+
+-- INIT BASIC VOICE PARAMS
+function init_voice_params()
+  for v = 1, VOICES do
+    params:add_separator("VOICE " .. v)
+    params:add_group(v .. " AUDIO", 16)
+
+    init_basic_voice_params(v)
+    init_playback_control_params(v)
+    init_level_and_send_params(v)
+    init_granular_params(v)
+    init_env_and_lfo_params(v)
+  end
+end
+
+function init_basic_voice_params(v)
+  params:add_taper(v .. "filter", v .. " filter", 0, 1, 0.5, 0)
+  params:set_action(v .. "filter", function(value) engine.filter(v, value) end)
+
+  params:add_taper(v .. "pan", v .. " pan", -1, 1, 0, 0)
+  params:set_action(v .. "pan", function(value) engine.pan(v, value) end)
+
+  params:add_binary(v .. "mute", v .. " mute", "toggle", 1)
+  params:set_action(v .. "mute", function(value) engine.mute(v, value) end)
+
+  params:add_binary(v .. "granular", v .. " granular/buffer", "toggle", 0)
+  params:set_action(v .. "granular", function(value) engine.useBufRd(v, value) end)
+end
+
+function init_playback_control_params(v)
+  params:add_binary(v .. "play_stop", v .. " play/stop", "toggle", 0)
+  params:set_action(v .. "play_stop", function(value)
+    if value == 1 then start_voice(v, positions[v]) else stop_voice(v) end
+  end)
+
+  params:add_binary(v .. "record", v .. " record", "toggle", 0)
+  params:set_action(v .. "record", function(value)
+    params:set(v .. "granular", 1)
+    engine.record(v, value)
+  end)
+
+  params:add_separator("BUFFER LENGTH")
+  params:add_taper(v .. "buffer_length", v .. " buffer_length", 0.1, 60, 5, 0.1)
+  params:add_binary(v .. "update_buffer_length", v .. " update buffer length")
+  params:set_action(v .. "update_buffer_length", function()
+    engine.buffer_length(v, params:get(v .. "buffer_length"))
+  end)
+
+  params:add_binary(v .. "save_buffer", v .. " save buffer")
+  params:set_action(v .. "save_buffer", function()
+    local timestamp = os.date("%Y%m%d%H%M%S")
+    local filepath = '/home/we/dust/audio/MSG/' .. timestamp .. 'buffer_' .. v .. '.wav'
+    engine.save_buffer(v, filepath)
+    params:set(v .. "sample", filepath)
+  end)
+end
+
+function init_level_and_send_params(v)
+  params:add_separator("LEVELS/SENDS")
+
+  params:add_taper(v .. "volume", v .. " volume", min_volume, max_volume, 0, 0, "dB")
+  params:set_action(v .. "volume", function(value) engine.volume(v, math.pow(10, value / 20)) end)
+
+  params:add_taper(v .. "saturation", v .. " saturation", min_saturation_send, max_saturation_send, min_delay_send, 0,
+    "dB")
+  params:set_action(v .. "saturation", function(value) engine.saturation(v, math.pow(10, value / 20)) end)
+
+  params:add_taper(v .. "delay", v .. " delay", min_delay_send, max_delay_send, min_delay_send, 0, "dB")
+  params:set_action(v .. "delay", function(value) engine.delay(v, math.pow(10, value / 20)) end)
+
+  params:add_taper(v .. "reverb", v .. " reverb", min_reverb_send, max_reverb_send, min_delay_send, 0, "dB")
+  params:set_action(v .. "reverb", function(value) engine.reverb(v, math.pow(10, value / 20)) end)
+
+  params:add_taper(v .. "filterbank", v .. " filterbank", min_filterbank_send, max_filterbank_send, min_delay_send, 0,
+    "dB")
+  params:set_action(v .. "filterbank", function(value) engine.filterbank(v, math.pow(10, value / 20)) end)
+end
+
+function init_granular_params(v)
+  params:add_group(v .. " GRANULAR", 10)
+  params:add {
+    type = "control",
+    id = v .. "finetune",
+    name = v .. ": finetune",
+    controlspec = controlspec.new(0, 4, "lin", 0.001, 1, "", 0.001),
+    action = function(value) engine.finetune(v, value) end
+  }
+
+  params:add_number(v .. "semitones", v .. ": semitones", min_semitones, max_semitones, 0)
+  params:set_action(v .. "semitones", function(value) engine.semitones(v, math.floor(value + 0.5)) end)
+
+  params:add_number(v .. "octaves", v .. ": octaves", min_octaves, max_octaves, 0)
+  params:set_action(v .. "octaves", function(value) engine.octaves(v, math.floor(value + 0.5)) end)
+
+  params:add_taper(v .. "fade", v .. ": fade", 0, 1, 0.1, 0)
+  params:set_action(v .. "fade", function(value) engine.fade(v, value) end)
+
+  params:add_taper(v .. "speed", v .. ": speed", min_speed, max_speed, 100, 0, "%")
+  params:set_action(v .. "speed", function(value)
+    local actual_speed = util.clamp(value, min_speed, max_speed)
+    engine.speed(v, actual_speed / 100)
+  end)
+
+  params:add {
+    type = "control",
+    id = v .. "position",
+    name = v .. ": position",
+    controlspec = controlspec.new(0, 1, "lin", 0, 0, ""),
+    action = function(value)
+      local actual_position = util.clamp(value, 0, 1)
+      positions[v] = actual_position
+      if gates[v] > 0 then
+        engine.seek(v, actual_position)
+      end
+    end
+  }
+
+  params:add_taper(v .. "jitter", v .. ": jitter", min_jitter, max_jitter, 0, 5, "ms")
+  params:set_action(v .. "jitter", function(value) engine.jitter(v, value / 1000) end)
+
+  params:add_taper(v .. "size", v .. ": size", min_size, max_size, 100, 5, "ms")
+  params:set_action(v .. "size", function(value) engine.size(v, value / 1000) end)
+
+  params:add_taper(v .. "density", v .. ": density", min_density, max_density, 20, 6, "hz")
+  params:set_action(v .. "density", function(value) engine.density(v, value) end)
+
+  params:add_taper(v .. "spread", v .. ": spread", 0, 100, 0, 0, "%")
+  params:set_action(v .. "spread", function(value) engine.spread(v, value / 100) end)
+end
+
+function init_env_and_lfo_params(v)
+  params:add_group(v .. " ENV", 5)
+
+  params:add_taper(v .. "fade", v .. ": att / dec", 0, 9000, 1000, 0, "ms")
+  params:set_action(v .. "fade", function(value) engine.envscale(v, value / 1000) end)
+
+  params:add_taper(v .. "attack", v .. ": attack", 0, 10, 1, 0)
+  params:set_action(v .. "attack", function(value) engine.attack(v, value) end)
+
+  params:add_taper(v .. "sustain", v .. ": sustain", 0, 10, 1, 0)
+  params:set_action(v .. "sustain", function(value) engine.sustain(v, value) end)
+
+  params:add_taper(v .. "release", v .. ": release", 0, 10, 1, 0)
+  params:set_action(v .. "release", function(value) engine.release(v, value) end)
+
+  params:add_binary(v .. "hold", v .. ": hold", "toggle", 1)
+
+  for lfo_num = 1, 4 do
+    local lfo_id = v .. "_lfo" .. lfo_num
+    params:add_group(v .. " LFO " .. lfo_num, 5)
+    params:add_taper(lfo_id .. "_rate", "LFO " .. lfo_num .. " rate", 0.001, 20, 0.5, 0, "Sec")
+    params:set_action(lfo_id .. "_rate", function(value)
+      lfos[v][lfo_num]:set('period', value)
+    end)
+    params:add_taper(lfo_id .. "_depth", "LFO " .. lfo_num .. " depth", 0, 1, 0.5, 0)
+    params:set_action(lfo_id .. "_depth", function(value)
+      lfos[v][lfo_num]:set('depth', value)
+    end)
+    params:add_binary(lfo_id .. "_enable", "LFO " .. lfo_num .. " enable", "toggle", 0)
+    params:set_action(lfo_id .. "_enable", function(value)
+      if value == 1 then lfos[v][lfo_num]:start() else lfos[v][lfo_num]:stop() end
+    end)
+    add_lfo_target_param(v, lfo_num)
+    params:add_taper(lfo_id .. "_offset", "LFO " .. lfo_num .. " Offset", -1, 1, 0, 0)
+    params:set_action(lfo_id .. "_offset", function(value)
+      lfos[v][lfo_num]:set('offset', value)
+    end)
+  end
 end
 
 -- ARC
@@ -1316,59 +1342,130 @@ end
 -- ENCODERS AND KEYS
 function enc(n, d)
   if n == 1 then
-    -- Change the selected voice
-    selected_voice = util.clamp(selected_voice + d, 1, VOICES)
-    arc_dirty = true
-  elseif n == 2 then
-    -- Parameter adjustments based on the current screen
-    if current_screen == 1 then
-      -- Adjusting 'filter' instead of 'volume'
-      params:delta(selected_voice .. "filter", d)
-    elseif current_screen == 2 then
-      params:delta(selected_voice .. "size", d)
-    elseif current_screen == 3 then
-      -- Wrapping around for position
-      local newPosition = positions[selected_voice] + (d / 100)
-      if newPosition > 1 then
-        newPosition = 0
-      elseif newPosition < 0 then
-        newPosition = 1
-      end
-      positions[selected_voice] = newPosition
-      params:set(selected_voice .. "position", newPosition)
+    if screen_mode_b then
+      screen_mode = util.clamp(screen_mode + d, 1, total_screens)
+    else
+      selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1, #get_param_list(screen_mode))
     end
+    screen_mode = util.clamp(screen_mode + d, 1, total_screens)
+  elseif n == 2 then
+    selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1, #get_param_list(screen_mode))
   elseif n == 3 then
-    if current_screen == 1 then
-      -- Adjusting 'volume' here since it's now paired with 'filter'
-      params:delta(selected_voice .. "volume", d)
-    elseif current_screen == 2 then
-      params:delta(selected_voice .. "density", d)
-    elseif current_screen == 3 then
-      params:delta(selected_voice .. "speed", d)
+    local param_list = get_param_list(screen_mode)
+    params:delta(param_list[selected_param[screen_mode]], d)
+  end
+  redraw()
+end
+
+function get_param_list(screen_mode)
+  if screen_mode == 1 and screen_mode_b then
+    return { selected_voice .. "buffer_length", selected_voice .. "update_buffer_length", selected_voice .. "save_buffer" }
+  elseif screen_mode == 1 then
+    return { selected_voice .. "volume", selected_voice .. "pan", selected_voice .. "filterbank", selected_voice ..
+    "saturation",
+      selected_voice .. "reverb", selected_voice .. "delay" }
+  elseif screen_mode == 2 then
+    return filterbank_params
+  elseif screen_mode == 3 then
+    return saturation_params
+  elseif screen_mode == 4 then
+    return delay_params
+  elseif screen_mode == 5 then
+    return reverb_params
+  else
+    return {}
+  end
+end
+
+-- Define variables for buffer update and save states
+local updating_buffer = false
+local saving_buffer = false
+
+function key(n, z)
+  if screen_mode == 1 and screen_mode_b then
+    if n == 2 and z == 1 then
+      screen_mode_b = false -- Switch back to screen 1a
+    elseif n == 3 and z == 1 then
+      local selected_param_id = selected_param[screen_mode]
+      if selected_param_id == 2 then
+        updating_buffer = true
+        engine.buffer_length(selected_voice, params:get(selected_voice .. "buffer_length"))
+        clock.run(function()
+          clock.sleep(1)
+          updating_buffer = false
+          redraw()
+        end)
+      elseif selected_param_id == 3 then
+        saving_buffer = true
+        local timestamp = os.date("%Y%m%d%H%M%S")
+        local filepath = '/home/we/dust/audio/MSG/' .. timestamp .. 'buffer_' .. selected_voice .. '.wav'
+        print(filepath)
+        engine.save_buffer(selected_voice, filepath)
+        params:set(selected_voice .. "sample", filepath)
+        clock.run(function()
+          clock.sleep(1)
+          saving_buffer = false
+          redraw()
+        end)
+      end
+    end
+  else
+    if n == 2 and z == 1 then
+      screen_mode_b = not screen_mode_b -- Toggle between screen 1a and screen 1b
+    elseif n == 1 and z == 1 then
+      screen_mode = util.clamp(screen_mode + z, 1, total_screens)
+    elseif n == 3 and z == 1 then
+      local param_list = get_param_list(screen_mode)
+      params:delta(param_list[selected_param[screen_mode]], z)
     end
   end
   redraw()
 end
 
-function key(n, z)
-  if n == 3 and z == 1 then
-    -- Toggle the screen
-    current_screen = (current_screen % 3) + 1
-    redraw()
-  elseif n == 2 and z == 1 then
-    -- Toggle play/stop for the selected voice
-    if gates[selected_voice] > 0 then
-      stop_voice(selected_voice)
-    else
-      start_voice(selected_voice)
+function enc(n, d)
+  if screen_mode == 1 and screen_mode_b then
+    if n == 2 then
+      selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1, #get_param_list(screen_mode))
+    elseif n == 3 then
+      local param_list = get_param_list(screen_mode)
+      params:delta(param_list[selected_param[screen_mode]], d)
+    end
+  else
+    if n == 1 then
+      screen_mode = util.clamp(screen_mode + d, 1, total_screens)
+    elseif n == 2 then
+      selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1, #get_param_list(screen_mode))
+    elseif n == 3 then
+      local param_list = get_param_list(screen_mode)
+      params:delta(param_list[selected_param[screen_mode]], d)
     end
   end
+  redraw()
 end
 
 function redraw()
   screen.clear()
 
-  -- Display selected track number at the top with large font
+  if screen_mode == 1 then
+    if screen_mode_b then
+      redraw_screen_1B()
+    else
+      redraw_screen_1()
+    end
+  elseif screen_mode == 2 then
+    redraw_screen_2()
+  elseif screen_mode == 3 then
+    redraw_screen_3()
+  elseif screen_mode == 4 then
+    redraw_screen_4()
+  elseif screen_mode == 5 then
+    redraw_screen_5()
+  end
+
+  screen.update()
+end
+
+function redraw_screen_1()
   local track_number_x = 0
   local track_number_y = 20
   screen.move(track_number_x, track_number_y)
@@ -1377,7 +1474,6 @@ function redraw()
   screen.text(string.format(selected_voice))
   screen.font_size(8)
 
-  -- Underline the track number if hold is off
   if params:get(selected_voice .. "hold") == 0 then
     local underline_start_x = track_number_x
     local underline_end_x = track_number_x + 20
@@ -1390,11 +1486,9 @@ function redraw()
 
   local hold_state_y = track_number_y + 20
 
-  -- Display Granular/Buffer mode with graphical representation
   local mode_y = hold_state_y
   screen.level(15)
   if params:get(selected_voice .. "granular") == 0 then
-    -- Draw particles for Granular mode
     for i = 1, 10 do
       local x = track_number_x + math.random(0, 10)
       local y = mode_y + math.random(-10, 10)
@@ -1403,7 +1497,6 @@ function redraw()
     screen.fill()
   end
 
-  -- Display Mute state with graphical representation
   local mute_state_y = mode_y + 18
   local mute_state_x = track_number_x + 1
   local mute_box_size = 10
@@ -1417,7 +1510,6 @@ function redraw()
     screen.fill()
   end
 
-  -- Display Record state with graphical representation
   local record_state_x = mute_state_x + mute_box_size + 10
   local record_state_y = mute_state_y + 2
   local record_circle_radius = 3
@@ -1432,39 +1524,161 @@ function redraw()
     screen.fill()
   end
 
-  -- Set the start position for parameter display
-  local param_y_start = 10
-  local param_x_start = 50
-  local line_spacing = 10
+  local param_list = get_param_list(1)
+  for i, param in ipairs(param_list) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[1] and 15 or 2)
+    -- filer out the voice number from the param name
+    local param_name = string.sub(param, 2)
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
+end
 
-  -- First pair: Filter and Volume
-  screen.move(param_x_start, param_y_start)
-  screen.level(current_screen == 1 and 15 or 2)
-  screen.text("Filter: " .. string.format("%.2f", params:get(selected_voice .. "filter")))
+function redraw_screen_1B()
+  local track_number_x = 0
+  local track_number_y = 20
+  screen.move(track_number_x, track_number_y)
+  screen.level(gates[selected_voice] > 0 and 15 or 2)
+  screen.font_size(24)
+  screen.text(string.format(selected_voice))
+  screen.font_size(8)
 
-  screen.move(param_x_start, param_y_start + line_spacing)
-  screen.level(current_screen == 1 and 15 or 2)
-  screen.text("Volume: " .. string.format("%.2f dB", params:get(selected_voice .. "volume")))
+  if params:get(selected_voice .. "hold") == 0 then
+    local underline_start_x = track_number_x
+    local underline_end_x = track_number_x + 20
+    local underline_y = track_number_y + 4
+    screen.move(underline_start_x, underline_y)
+    screen.line(underline_end_x, underline_y)
+    screen.close()
+    screen.stroke()
+  end
 
-  -- Second pair: Size and Density
-  screen.move(param_x_start, param_y_start + 2 * line_spacing)
-  screen.level(current_screen == 2 and 15 or 2)
-  screen.text("Size: " .. string.format("%.2f ms", params:get(selected_voice .. "size")))
+  local hold_state_y = track_number_y + 20
 
-  screen.move(param_x_start, param_y_start + 3 * line_spacing)
-  screen.level(current_screen == 2 and 15 or 2)
-  screen.text("Density: " .. string.format("%.2f Hz", params:get(selected_voice .. "density")))
+  local mode_y = hold_state_y
+  screen.level(15)
+  if params:get(selected_voice .. "granular") == 0 then
+    for i = 1, 10 do
+      local x = track_number_x + math.random(0, 10)
+      local y = mode_y + math.random(-10, 10)
+      screen.pixel(x, y)
+    end
+    screen.fill()
+  end
 
-  -- Third pair: Position and Speed
-  screen.move(param_x_start, param_y_start + 4 * line_spacing)
-  screen.level(current_screen == 3 and 15 or 2)
-  screen.text("Position: " .. string.format("%.2f", positions[selected_voice]))
+  local mute_state_y = mode_y + 18
+  local mute_state_x = track_number_x + 1
+  local mute_box_size = 10
+  screen.move(mute_state_x, mute_state_y)
+  screen.level(2)
+  screen.rect(mute_state_x, mute_state_y, mute_box_size, mute_box_size / 2)
+  screen.stroke()
+  if params:get(selected_voice .. "mute") == 1 then
+    screen.level(12)
+    screen.rect(mute_state_x, mute_state_y, mute_box_size - 1, mute_box_size / 2 - 1)
+    screen.fill()
+  end
 
-  screen.move(param_x_start, param_y_start + 5 * line_spacing)
-  screen.level(current_screen == 3 and 15 or 2)
-  screen.text("Speed: " .. string.format("%.2f%%", params:get(selected_voice .. "speed")))
+  local record_state_x = mute_state_x + mute_box_size + 10
+  local record_state_y = mute_state_y + 2
+  local record_circle_radius = 3
+  screen.move(record_state_x, record_state_y)
+  if params:get(selected_voice .. "record") == 1 then
+    screen.level(15)
+    screen.circle(record_state_x, record_state_y, record_circle_radius)
+    screen.fill()
+  else
+    screen.level(2)
+    screen.circle(record_state_x, record_state_y, record_circle_radius)
+    screen.fill()
+  end
 
-  screen.update()
+  local param_list = get_param_list(1)
+  for i, param in ipairs(param_list) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[1] and 15 or 2)
+    local param_name = string.sub(param, 2)
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
+
+  -- Add indicators for buffer updates and saves
+  if updating_buffer then
+    screen.move(90, 40)
+    screen.level(15)
+    screen.text("Updating...")
+  elseif saving_buffer then
+    screen.move(90, 40)
+    screen.level(15)
+    screen.text("Saving...")
+  end
+end
+
+function redraw_screen_2()
+  screen.move(0, 20)
+  screen.level(15)
+  screen.font_size(24)
+  screen.text("FB")
+  screen.font_size(8)
+
+  for i, param in ipairs(filterbank_params) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[2] and 15 or 2)
+    -- remove 'filterbank_' from the param name
+    param_name = string.sub(param, 12)
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
+end
+
+function redraw_screen_3()
+  screen.move(0, 20)
+  screen.level(15)
+  screen.font_size(24)
+  screen.text("ST")
+  screen.font_size(8)
+
+  for i, param in ipairs(saturation_params) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[3] and 15 or 2)
+    screen.text(param .. ": " .. string.format("%.2f", params:get(param)))
+  end
+end
+
+function redraw_screen_4()
+  screen.move(0, 20)
+  screen.level(15)
+  screen.font_size(24)
+  screen.text("DL")
+  screen.font_size(8)
+
+  for i, param in ipairs(delay_params) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[4] and 15 or 2)
+    -- remove 'delay_' from the param name
+    param_name = string.sub(param, 7)
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
+end
+
+function redraw_screen_5()
+  screen.move(0, 20)
+  screen.level(15)
+  screen.font_size(24)
+  screen.text("RE")
+  screen.font_size(8)
+
+  for i, param in ipairs(reverb_params) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_param[5] and 15 or 2)
+    -- remove 'reverb_' from the param name
+    param_name = string.sub(param, 8)
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
 end
 
 -- Setup LFOs for each voice
