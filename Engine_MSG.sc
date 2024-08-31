@@ -85,6 +85,15 @@ Engine_MSG : CroneEngine {
 		});
 	}
 
+	setBufferForVoice { arg voiceIndex, bufferIndex;
+    if (voices[voiceIndex].notNil and: { buffers[bufferIndex].notNil }) {
+        voices[voiceIndex].set(\buf1, buffers[bufferIndex][0], \buf2, buffers[bufferIndex][0]);
+    } {
+        "Invalid voice or buffer index".postln;
+    }
+}
+
+
 	alloc {
 		~tf =  Env([-0.7, 0, 0.7], [1,1], [8,-8]).asSignal(1025);
 		~tf = ~tf + (
@@ -562,7 +571,9 @@ Engine_MSG : CroneEngine {
 			voices[voice].set(\record, msg[2]);
 		});
 
-
+		this.addCommand("set_buffer_for_voice", "ii", { arg msg;
+			this.setBufferForVoice(msg[1] - 1, msg[2] - 1);  
+		});
 
 		this.addCommand("speed", "if", { arg msg;
 			var voice = msg[1] - 1;
