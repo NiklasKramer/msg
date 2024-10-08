@@ -223,6 +223,7 @@ function add_lfo_target_param(voice, lfo_num)
 end
 
 local function record_grid_event(x, y, z)
+  print("record_grid_event")
   if record_bank > 0 then
     local current_time = util.time()
     if record_prevtime < 0 then
@@ -231,10 +232,12 @@ local function record_grid_event(x, y, z)
 
     local time_delta = current_time - record_prevtime
     local action_type = nil
-
+    print("record_grid_event", x, y)
     if y == control_row and x > 5 then
+      print("control row")
       action_type = 'control' -- Use a specific action type for the control row
     elseif y == semitone_row and alt then
+      print("semitone row")
       action_type = 'octaves'
     elseif y == semitone_row then
       action_type = 'semitone'
@@ -686,7 +689,7 @@ function grid_refresh()
 end
 
 function grid_key(x, y, z, skip_record)
-  if (y >= voices_start_row and y < control_row) and not skip_record then
+  if (y >= voices_start_row and y < number_of_rows) and not skip_record then
     record_grid_event(x, y, z)
   end
 
@@ -821,7 +824,7 @@ function init_polls()
         positions[v] = pos
       end
     end)
-    phase_poll.time = 0.05
+    phase_poll.time = 0.03
     phase_poll:start()
 
     local level_poll = poll.set('level_' .. v, function(lvl) voice_levels[v] = lvl end)
@@ -1091,7 +1094,7 @@ end
 function init_voice_params()
   for v = 1, VOICES do
     params:add_separator("VOICE " .. v)
-    params:add_group(v .. " AUDIO", 16)
+    params:add_group(v .. " AUDIO", 17)
 
     init_basic_voice_params(v)
     init_playback_control_params(v)
@@ -1113,6 +1116,9 @@ function init_basic_voice_params(v)
 
   params:add_binary(v .. "granular", v .. " granular/buffer", "toggle", 0)
   params:set_action(v .. "granular", function(value) engine.useBufRd(v, value) end)
+
+  params:add_binary(v .. "clicky", v .. " clicky", "toggle", 0)
+  params:set_action(v .. "clicky", function(value) engine.clicky(v, value) end)
 end
 
 function init_playback_control_params(v)
@@ -1165,7 +1171,7 @@ function init_level_and_send_params(v)
 end
 
 function init_granular_params(v)
-  params:add_group(v .. " GRANULAR", 10)
+  params:add_group(v .. " GRANULAR", 11)
   params:add {
     type = "control",
     id = v .. "finetune",
@@ -1179,6 +1185,9 @@ function init_granular_params(v)
 
   params:add_number(v .. "octaves", v .. ": octaves", min_octaves, max_octaves, 0)
   params:set_action(v .. "octaves", function(value) engine.octaves(v, math.floor(value + 0.5)) end)
+
+  params:add_taper(v .. "glide", v .. ": glide", 0, 5, 0.001, 0)
+  params:set_action(v .. "glide", function(value) engine.lagtime(v, value) end)
 
   params:add_taper(v .. "fade", v .. ": fade", 0, 1, 0.1, 0)
   params:set_action(v .. "fade", function(value) engine.fade(v, value) end)
@@ -1219,8 +1228,8 @@ end
 function init_env_and_lfo_params(v)
   params:add_group(v .. " ENV", 5)
 
-  params:add_taper(v .. "fade", v .. ": att / dec", 0, 9000, 1000, 0, "ms")
-  params:set_action(v .. "fade", function(value) engine.envscale(v, value / 1000) end)
+  params:add_taper(v .. "envscale", v .. ": att / dec", 0, 9000, 1000, 0, "ms")
+  params:set_action(v .. "envscale", function(value) engine.envscale(v, value / 1000) end)
 
   params:add_taper(v .. "attack", v .. ": attack", 0, 10, 1, 0)
   params:set_action(v .. "attack", function(value) engine.attack(v, value) end)

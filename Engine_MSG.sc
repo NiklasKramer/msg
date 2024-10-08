@@ -26,6 +26,7 @@ Engine_MSG : CroneEngine {
 
 	// disk read
 	readBuf { arg i, path;
+		("Reading buffer " ++ i ++ " from " ++ path).postln;
 		if(buffers[i].notNil, {
 			if (File.exists(path), {
 				var temp = Buffer.read(context.server, path, 0, 1, {
@@ -122,7 +123,8 @@ Engine_MSG : CroneEngine {
 				gate=0, pos=0, speed=1, jitter=0, fade=0.5,
 				size=0.1, density=20, finetune=1, semitones=0, octaves=0, spread=0, 
 				gain=1, envscale=1, attack=1, sustain=1, release=1, record=0,
-				freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1, mute=1, fadeTime=0.1;
+				freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1, mute=1, fadeTime=0.1,
+				clicky=0, speed_lag_time=0.1; 
 
 			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch;
 			var aOrB, crossfade, reset_pos_a, reset_pos_b, updated_semitones, semitones_in_hz;
@@ -130,9 +132,7 @@ Engine_MSG : CroneEngine {
 			var t_buf_pos_a, t_buf_pos_b, buf_rd_left_a, buf_rd_right_a, buf_rd_left_b, buf_rd_right_b;
 			var env, level, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, filtered, stereo_sig, tremolo, signal, record_pos;
 
-			
-
-
+			speed = Lag.kr(speed, speed_lag_time );
 
 			// Initialize triggers and random signals
 			grain_trig = Impulse.kr(density);
@@ -147,8 +147,10 @@ Engine_MSG : CroneEngine {
 
 			// Buffer reading control
 			aOrB = ToggleFF.kr(t_reset_pos);
-			// crossfade = Lag.ar(K2A.ar(aOrB), fade);
 			crossfade = K2A.ar(aOrB);
+
+			semitones = Lag.kr(semitones, fadeTime);
+			octaves = Lag.kr(octaves, fadeTime);
 
 			reset_pos_a = Latch.kr(pos * BufFrames.kr(buf1), aOrB);
 			reset_pos_b = Latch.kr(pos * BufFrames.kr(buf1), 1 - aOrB);
@@ -175,7 +177,7 @@ Engine_MSG : CroneEngine {
 				end: BufFrames.kr(bufnum: buf1),
 				resetPos: reset_pos_b
 			);
-			
+
 			pitch = finetune * semitones_in_hz;
 			tremolo = 1 + (density / 100 * SinOsc.kr(size * 100).range(-1, 1));
 
@@ -183,27 +185,29 @@ Engine_MSG : CroneEngine {
 			signal = SoundIn.ar([0, 1]);
 
 			record_pos = Select.ar(useBufRd, [pos_sig, Select.ar(aOrB, [t_buf_pos_b, t_buf_pos_a])]);
-			// record_pos = Select.ar(record, [record_pos, record_pos * -1]);
 
 			BufWr.ar(signal[0], buf1*record, record_pos);
 			BufWr.ar(signal[1], buf2*record, record_pos);
 
-			
-
-
-			// Signal generation
+			// Signal generation with clicky control
 			sig = Select.ar(useBufRd, [
 				Mix.ar(GrainBuf.ar(2, grain_trig, size, [buf1, buf2], pitch, pos_sig + jitter_sig, 2, ([-1, 1] + pan_sig).clip(-1, 1))) / 2,
 				{
 					buf_rd_left_a = BufRd.ar(1, buf1, t_buf_pos_a, loop: 1) * tremolo;
 					buf_rd_right_a = BufRd.ar(1, buf2, t_buf_pos_a, loop: 1) * tremolo;
+
 					buf_rd_left_b = BufRd.ar(1, buf1, t_buf_pos_b, loop: 1) * tremolo;
 					buf_rd_right_b = BufRd.ar(1, buf2, t_buf_pos_b, loop: 1) * tremolo;
 
-					[
-						(crossfade * buf_rd_left_a) + ((1 - crossfade) * buf_rd_left_b),
-						(crossfade * buf_rd_right_a) + ((1 - crossfade) * buf_rd_right_b)
-					];
+					Select.ar(clicky, [
+						// Normal crossfade operation
+						[
+							(crossfade * buf_rd_left_a) + ((1 - crossfade) * buf_rd_left_b),
+							(crossfade * buf_rd_right_a) + ((1 - crossfade) * buf_rd_right_b)
+						],
+						// Clicky operation
+						[buf_rd_left_a, buf_rd_right_a]
+					]);
 				}
 			]);
 
@@ -236,6 +240,7 @@ Engine_MSG : CroneEngine {
 			Out.kr(phase_out, (Select.kr(useBufRd, [pos_sig, Select.kr(aOrB, [t_buf_pos_b, t_buf_pos_a]) / BufFrames.kr(buf1)]) * smooth_mute));
 			Out.kr(level_out, level * smooth_mute);
 		}).add;
+
 
 
 
@@ -409,8 +414,6 @@ Engine_MSG : CroneEngine {
 
 		
 		
-		
-
 	
 		context.server.sync;
 
@@ -640,6 +643,11 @@ Engine_MSG : CroneEngine {
 			voices[voice].set(\fade, msg[2]);
 		});
 
+		this.addCommand("lagtime", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\speed_lag_time, msg[2]);
+		});
+
 		this.addCommand("envscale", "if", { arg msg;
 			var voice = msg[1] - 1;
 			voices[voice].set(\envscale, msg[2]);
@@ -683,6 +691,11 @@ Engine_MSG : CroneEngine {
 		this.addCommand("useBufRd", "if", { arg msg;
 			var voice = msg[1] - 1;
 			voices[voice].set(\useBufRd, msg[2]);
+		});
+
+		this.addCommand("clicky", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\clicky, msg[2]);
 		});
 	
 		
