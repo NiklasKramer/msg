@@ -120,17 +120,17 @@ Engine_MSG : CroneEngine {
 				reverb_out=0, reverb_level=0, 
 				filterbank_out=0, filterbank_level=0, 
 				pan=0, buf1, buf2,
-				gate=0, pos=0, speed=1, jitter=0, fade=0.5,
+				gate=0, pos=0, speed=1, jitter=0, fade=0.5, direction=1,
 				size=0.1, density=20, finetune=1, semitones=0, octaves=0, spread=0, 
 				gain=1, envscale=1, attack=1, sustain=1, release=1, record=0,
 				freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1, mute=1, fadeTime=0.1,
-				clicky=0, speed_lag_time=0.1; 
+				clicky=0, speed_lag_time=0.1, tremolo_rate=0, tremolo_depth=0; 
 
 			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch;
 			var aOrB, crossfade, reset_pos_a, reset_pos_b, updated_semitones, semitones_in_hz;
 			var jitter_lfo_freq, jitter_lfo_depth, jitter_lfo, jitter_rate;
 			var t_buf_pos_a, t_buf_pos_b, buf_rd_left_a, buf_rd_right_a, buf_rd_left_b, buf_rd_right_b;
-			var env, level, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, filtered, stereo_sig, tremolo, signal, record_pos;
+			var env, level, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, filtered, stereo_sig, tremoloLFO, signal, record_pos;
 
 			speed = Lag.kr(speed, speed_lag_time );
 
@@ -149,8 +149,8 @@ Engine_MSG : CroneEngine {
 			aOrB = ToggleFF.kr(t_reset_pos);
 			crossfade = K2A.ar(aOrB);
 
-			semitones = Lag.kr(semitones, fadeTime);
-			octaves = Lag.kr(octaves, fadeTime);
+			semitones = Lag.kr(semitones, speed_lag_time);
+			octaves = Lag.kr(octaves, speed_lag_time);
 
 			reset_pos_a = Latch.kr(pos * BufFrames.kr(buf1), aOrB);
 			reset_pos_b = Latch.kr(pos * BufFrames.kr(buf1), 1 - aOrB);
@@ -160,7 +160,8 @@ Engine_MSG : CroneEngine {
 			jitter_lfo_freq = LinLin.kr(jitter, 0, 1, 0.8, 25); 
 			jitter_lfo_depth = LinLin.kr(jitter, 0, 1, 0.0, 0.1);
 			jitter_lfo = SinOsc.kr(jitter_lfo_freq, 0, jitter_lfo_depth, 1);
-			jitter_rate = BufRateScale.kr(bufnum: buf1) * speed * semitones_in_hz * jitter_lfo;
+			
+			jitter_rate = BufRateScale.kr(bufnum: buf1) * speed * semitones_in_hz * jitter_lfo * direction;
 
 			t_buf_pos_a = Phasor.ar(
 				trig: aOrB,
@@ -179,7 +180,6 @@ Engine_MSG : CroneEngine {
 			);
 
 			pitch = finetune * semitones_in_hz;
-			tremolo = 1 + (density / 100 * SinOsc.kr(size * 100).range(-1, 1));
 
 			// Recording
 			signal = SoundIn.ar([0, 1]);
@@ -191,13 +191,13 @@ Engine_MSG : CroneEngine {
 
 			// Signal generation with clicky control
 			sig = Select.ar(useBufRd, [
-				Mix.ar(GrainBuf.ar(2, grain_trig, size, [buf1, buf2], pitch, pos_sig + jitter_sig, 2, ([-1, 1] + pan_sig).clip(-1, 1))) / 2,
+				    Mix.ar(GrainBuf.ar(2, grain_trig, size, [buf1, buf2], pitch, (pos_sig + jitter_sig) * direction, 2, ([-1, 1] + pan_sig).clip(-1, 1))) / 2 ,
 				{
-					buf_rd_left_a = BufRd.ar(1, buf1, t_buf_pos_a, loop: 1) * tremolo;
-					buf_rd_right_a = BufRd.ar(1, buf2, t_buf_pos_a, loop: 1) * tremolo;
+					buf_rd_left_a = BufRd.ar(1, buf1, t_buf_pos_a, loop: 1) ;
+					buf_rd_right_a = BufRd.ar(1, buf2, t_buf_pos_a, loop: 1) ;
 
-					buf_rd_left_b = BufRd.ar(1, buf1, t_buf_pos_b, loop: 1) * tremolo;
-					buf_rd_right_b = BufRd.ar(1, buf2, t_buf_pos_b, loop: 1) * tremolo;
+					buf_rd_left_b = BufRd.ar(1, buf1, t_buf_pos_b, loop: 1) ;
+					buf_rd_right_b = BufRd.ar(1, buf2, t_buf_pos_b, loop: 1) ;
 
 					Select.ar(clicky, [
 						// Normal crossfade operation
@@ -210,6 +210,10 @@ Engine_MSG : CroneEngine {
 					]);
 				}
 			]);
+
+			// Apply tremolo
+			tremoloLFO = SinOsc.kr(Lag.kr(tremolo_rate, 0.1), 0, tremolo_depth, 1);
+			sig = sig * tremoloLFO;
 
 			// Envelope generation
 			env = EnvGen.kr(Env.asr(attack, sustain, release), gate: gate, timeScale: envscale);
@@ -583,6 +587,12 @@ Engine_MSG : CroneEngine {
 			voices[voice].set(\speed, msg[2]);
 		});
 
+		this.addCommand("direction", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\direction, msg[2]);
+		});
+
+
 		this.addCommand("jitter", "if", { arg msg;
 			var voice = msg[1] - 1;
 			voices[voice].set(\jitter, msg[2]);
@@ -668,6 +678,16 @@ Engine_MSG : CroneEngine {
 			voices[voice].set(\release, msg[2]);
 		});
 
+		this.addCommand("tremoloRate", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\tremolo_rate, msg[2]);
+		});
+
+		this.addCommand("tremoloDepth", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\tremolo_depth, msg[2]);
+		});
+
 		this.addCommand("saturation", "if", { arg msg;
 			var voice = msg[1] - 1;
 			voices[voice].set(\saturation_level, msg[2]);
@@ -699,8 +719,6 @@ Engine_MSG : CroneEngine {
 		});
 	
 		
-		
-
 	
 		nvoices.do({ arg i;
 			this.addPoll(("phase_" ++ (i+1)).asSymbol, {
