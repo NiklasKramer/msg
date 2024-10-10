@@ -1036,7 +1036,7 @@ end
 function init_voice_params()
   for v = 1, VOICES do
     params:add_separator("VOICE " .. v)
-    params:add_group("AUDIO", 28)
+    params:add_group("AUDIO", 32)
 
     init_playback_control_params(v)
     init_level_and_send_params(v)
@@ -1143,11 +1143,23 @@ function init_level_and_send_params(v)
   params:add_taper(v .. "pan", "Pan", -1, 1, 0, 0)
   params:set_action(v .. "pan", function(value) engine.pan(v, value) end)
 
-  params:add_taper(v .. "tremolo_rate", "Tremolo Rate", 0.1, 10, 1, 0)
-  params:set_action(v .. "tremolo_rate", function(value) engine.tremoloRate(v, value) end)
+  params:add_taper(v .. "bit_depth", "Bit Depth", 1, 24, 24, 0)
+  params:set_action(v .. "bit_depth", function(value) engine.bitDepth(v, value) end)
+
+  params:add_taper(v .. "sample_rate", "Sample Rate", 1, 48000, 48000, 0)
+  params:set_action(v .. "sample_rate", function(value) engine.sampleRate(v, value) end)
+
+  params:add_taper(v .. "reduction_mix", "Reduction Mix", 0, 1, 0, 0)
+  params:set_action(v .. "reduction_mix", function(value) engine.reductionMix(v, value) end)
 
   params:add_taper(v .. "tremolo_depth", "Tremolo Depth", 0, 1, 0, 0)
   params:set_action(v .. "tremolo_depth", function(value) engine.tremoloDepth(v, value) end)
+
+  params:add_taper(v .. "tremolo_rate", "Tremolo Rate", 0, 20, 0, 0)
+  params:set_action(v .. "tremolo_rate", function(value) engine.tremoloRate(v, value) end)
+
+  params:add_taper(v .. "wobble", "Wobble", 0, 1, 0, 0)
+  params:set_action(v .. "wobble", function(value) engine.wobble(v, value) end)
 
   params:add_taper(v .. "saturation", "Saturation Send", min_saturation_send, max_saturation_send, min_delay_send, 0,
     "dB")
@@ -1165,10 +1177,7 @@ function init_level_and_send_params(v)
 end
 
 function init_granular_params(v)
-  params:add_group("GRANULAR", 5)
-
-  params:add_taper(v .. "fade", "Fade", 0, 1, 0.1, 0)
-  params:set_action(v .. "fade", function(value) engine.fade(v, value) end)
+  params:add_group("GRANULAR", 4)
 
   params:add_taper(v .. "jitter", "Jitter", min_jitter, max_jitter, 0, 5, "ms")
   params:set_action(v .. "jitter", function(value) engine.jitter(v, value / 1000) end)
