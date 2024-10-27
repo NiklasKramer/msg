@@ -238,6 +238,8 @@ Engine_MSG : CroneEngine {
 				dryAndHighPass,
 			]);
 
+
+
 			stereo_sig = Balance2.ar(filtered[0], filtered[1], pan);
 
 			// Output signals
