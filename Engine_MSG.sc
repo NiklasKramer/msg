@@ -126,8 +126,8 @@ Engine_MSG : CroneEngine {
 				freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1, mute=1, fadeTime=0.1,
 				clicky=0, speed_lag_time=0.1, tremolo_rate=0, tremolo_depth=0, bitDepth=24, sampleRate=44100, reductionMix=0; 
 
-			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch;
-			var aOrB, crossfade, reset_pos_a, reset_pos_b, updated_semitones, semitones_in_hz;
+			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch, selected_buf_pos;
+			var aOrB, crossfade, reset_pos_a, reset_pos_b, updated_semitones, semitones_in_hz, clicky_sig, gran_sig;
 			var wobble_lfo_freq, wobble_lfo_depth, wobble_lfo, wobble_rate;
 			var t_buf_pos_a, t_buf_pos_b, buf_rd_left_a, buf_rd_right_a, buf_rd_left_b, buf_rd_right_b;
 			var env, level, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, filtered, stereo_sig, tremoloLFO, signal, record_pos, reduced;
@@ -140,6 +140,7 @@ Engine_MSG : CroneEngine {
 			pan_sig = TRand.kr(trig: grain_trig, lo: spread.neg, hi: spread);
 			jitter_sig = TRand.kr(trig: grain_trig, lo: buf_dur.reciprocal.neg * jitter, hi: buf_dur.reciprocal * jitter);
 			buf_pos = Phasor.ar(trig: t_reset_pos, rate: buf_dur.reciprocal / SampleRate.ir * speed * direction, resetPos: pos);
+			
 			pos_sig = Wrap.ar(Select.kr(freeze, [buf_pos, pos]));
 
 			// Apply fade time to mute control
@@ -183,15 +184,19 @@ Engine_MSG : CroneEngine {
 
 			// Recording
 			signal = SoundIn.ar([0, 1]);
-
-			record_pos = Select.ar(useBufRd, [pos_sig, Select.ar(aOrB, [t_buf_pos_b, t_buf_pos_a])]);
+			
+			selected_buf_pos = Select.ar(aOrB, [t_buf_pos_b, t_buf_pos_a]);
+			record_pos = Select.ar(useBufRd, [pos_sig, selected_buf_pos]);
 
 			BufWr.ar(signal[0], buf1*record, record_pos);
 			BufWr.ar(signal[1], buf2*record, record_pos);
 
+			gran_sig = Mix.ar(GrainBuf.ar(2, grain_trig, size, [buf1, buf2], pitch, (pos_sig + jitter_sig), 2, ([-1, 1] + pan_sig).clip(-1, 1))) / 2;
+
+
 			// Signal generation with clicky control
 			sig = Select.ar(useBufRd, [
-				    Mix.ar(GrainBuf.ar(2, grain_trig, size, [buf1, buf2], pitch, (pos_sig + jitter_sig), 2, ([-1, 1] + pan_sig).clip(-1, 1))) / 2 ,
+				    gran_sig,
 
 				{
 					buf_rd_left_a = BufRd.ar(1, buf1, t_buf_pos_a, loop: 1) ;
@@ -200,18 +205,25 @@ Engine_MSG : CroneEngine {
 					buf_rd_left_b = BufRd.ar(1, buf1, t_buf_pos_b, loop: 1) ;
 					buf_rd_right_b = BufRd.ar(1, buf2, t_buf_pos_b, loop: 1) ;
 
-					Select.ar(clicky, [
-						// Normal crossfade operation
-						[
-							(crossfade * buf_rd_left_a) + ((1 - crossfade) * buf_rd_left_b),
-							(crossfade * buf_rd_right_a) + ((1 - crossfade) * buf_rd_right_b)
-						],
-						// Clicky operation
-						[buf_rd_left_a, buf_rd_right_a]
-					]);
+					
+					[
+						(crossfade * buf_rd_left_a) + ((1 - crossfade) * buf_rd_left_b),
+						(crossfade * buf_rd_right_a) + ((1 - crossfade) * buf_rd_right_b)
+					]
+					
 				}
 			]);
 
+			clicky_sig = Select.ar(useBufRd, [
+				    gran_sig,
+					[
+						BufRd.ar(1, buf1, record_pos, loop: 1),
+						BufRd.ar(1, buf2, record_pos, loop: 1)
+					]]);
+
+			sig = Select.ar(clicky, [sig, clicky_sig]);
+
+			
 			// Bitcrusher
 			reduced = Decimator.ar(sig, rate: sampleRate, bits: bitDepth);
 			sig = XFade2.ar(sig, reduced, (reductionMix * 2) - 1);
@@ -238,8 +250,7 @@ Engine_MSG : CroneEngine {
 				dryAndHighPass,
 			]);
 
-
-
+			// Pan and balance
 			stereo_sig = Balance2.ar(filtered[0], filtered[1], pan);
 
 			// Output signals
@@ -248,16 +259,13 @@ Engine_MSG : CroneEngine {
 			Out.ar(delay_out, stereo_sig * level * delay_level * smooth_mute);
 			Out.ar(reverb_out, stereo_sig * level * reverb_level * smooth_mute);
 			Out.ar(filterbank_out, stereo_sig * level * filterbank_level * smooth_mute);
-			Out.kr(phase_out, (Select.kr(useBufRd, [pos_sig, Select.kr(aOrB, [t_buf_pos_b, t_buf_pos_a]) / BufFrames.kr(buf1)]) * smooth_mute));
+			
+			// Control signals
+			Out.kr(phase_out, (Select.kr(useBufRd, [pos_sig, selected_buf_pos / BufFrames.kr(buf1)]) * smooth_mute));
 			Out.kr(level_out, level * smooth_mute);
 		}).add;
 
-
-
-
-
-
-
+		///////////////////////////////////////////
 
 		SynthDef(\saturator, { |in=0, out=0, srate=48000, sdepth=32, crossover=1400, distAmount=15, lowbias=0.04, highbias=0.12, hissAmount=0.0, cutoff=11500, outVolume=1|
 			var input = In.ar(in, 2);  // Read 2 channels from the input
