@@ -124,7 +124,8 @@ Engine_MSG : CroneEngine {
 				size=0.1, density=20, finetune=1, semitones=0, octaves=0, spread=0,wobble=0, 
 				gain=1, envscale=1, attack=1, sustain=1, release=1, record=0,
 				freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1, mute=1, fadeTime=0.1,
-				clicky=0, speed_lag_time=0.1, tremolo_rate=0, tremolo_depth=0, bitDepth=24, sampleRate=44100, reductionMix=0; 
+				clicky=0, speed_lag_time=0.1, tremolo_rate=0, tremolo_depth=0, bitDepth=24, sampleRate=48000, reductionMix=0,
+				start=0, end=1;
 
 			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch, selected_buf_pos;
 			var aOrB, crossfade, reset_pos_a, reset_pos_b, updated_semitones, semitones_in_hz, clicky_sig, gran_sig;
@@ -139,7 +140,10 @@ Engine_MSG : CroneEngine {
 			buf_dur = BufDur.kr(buf1);
 			pan_sig = TRand.kr(trig: grain_trig, lo: spread.neg, hi: spread);
 			jitter_sig = TRand.kr(trig: grain_trig, lo: buf_dur.reciprocal.neg * jitter, hi: buf_dur.reciprocal * jitter);
-			buf_pos = Phasor.ar(trig: t_reset_pos, rate: buf_dur.reciprocal / SampleRate.ir * speed * direction, resetPos: pos);
+			buf_pos = Phasor.ar(
+				trig: t_reset_pos, 
+				rate: buf_dur.reciprocal / SampleRate.ir * speed * direction, 
+				resetPos: pos);
 			
 			pos_sig = Wrap.ar(Select.kr(freeze, [buf_pos, pos]));
 
@@ -167,16 +171,16 @@ Engine_MSG : CroneEngine {
 			t_buf_pos_a = Phasor.ar(
 				trig: aOrB,
 				rate: wobble_rate,
-				start: 0,
-				end: BufFrames.kr(bufnum: buf1),
+				start: start * BufFrames.kr(bufnum: buf1),
+				end: end * BufFrames.kr(bufnum: buf1),
 				resetPos: reset_pos_a
 			);
 
 			t_buf_pos_b = Phasor.ar(
 				trig: 1 - aOrB,
 				rate: wobble_rate,
-				start: 0,
-				end: BufFrames.kr(bufnum: buf1),
+				start: start * BufFrames.kr(bufnum: buf1),
+				end: end * BufFrames.kr(bufnum: buf1),
 				resetPos: reset_pos_b
 			);
 
@@ -569,6 +573,16 @@ Engine_MSG : CroneEngine {
 				voices[voice].set(\t_reset_pos, 1);
 				voices[voice].set(\freeze, 0);
 			});
+		});
+
+		this.addCommand("loop_start", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\start, msg[2]);
+		});
+
+		this.addCommand("loop_end", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\end, msg[2]);
 		});
 
 		this.addCommand("buffer_length", "if", { arg msg;

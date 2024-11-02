@@ -27,6 +27,8 @@ local screen_mode_b = false
 
 -- Global variable to keep track of selected parameter index for each screen
 local selected_param = { 1, 1, 1, 1, 1 }
+local loop_keys = {}
+
 
 -- Voice and control parameters
 local selected_voice = 1
@@ -526,7 +528,11 @@ function grid_refresh()
   grid_ctl:led_level_all(0)
   grid_voc:led_level_all(0)
 
+  -- Indicator for alt mode in top right corner
   grid_ctl:led_level_set(16, top_row, alt and 15 or 8)
+
+  -- Low brightness for loop area
+  local loop_brightness = 3
 
   for i = 1, VOICES do
     local voice_level = 1
@@ -537,13 +543,27 @@ function grid_refresh()
       voice_level = math.floor(swell)
     end
 
+    -- Set voice indicators on top rows
     if i <= 4 then
       grid_ctl:led_level_set(i, voices_start_row - 2, voice_level)
     else
       grid_ctl:led_level_set(i - 4, voices_start_row - 1, voice_level)
     end
+
+    -- Loop area display: only if loop is on for this voice
+    if params:get(i .. "loop_on") == 1 then
+      local loop_start = params:get(i .. "loop_start") * 16 + 1
+      local loop_end = params:get(i .. "loop_end") * 16 + 1
+      local loop_row = voices_start_row - 1 + i
+
+      -- Illuminate loop area
+      for col = math.floor(loop_start), math.floor(loop_end) do
+        grid_ctl:led_level_set(col, loop_row, loop_brightness)
+      end
+    end
   end
 
+  -- Recorder state and LED updates
   for i = 1, RECORDER do
     local level = 3
     if #grid_pattern_banks[i] > 0 or #arc_pattern_banks[i] > 0 then
@@ -560,6 +580,7 @@ function grid_refresh()
     grid_ctl:led_level_set(col, row, level)
   end
 
+  -- Arc selection indicator
   if selected_arc == 1 then
     grid_ctl:led_level_set(16, arc_selection_row, 1)
   elseif selected_arc == 2 then
@@ -568,18 +589,21 @@ function grid_refresh()
     grid_ctl:led_level_set(16, arc_selection_row, 15)
   end
 
+  -- Blink indicator for recording bank
   if record_bank > 0 then
     local row = (record_bank <= 9) and recorder_row_1 or recorder_row_2
     local col = ((record_bank - 1) % 9) + 6
     grid_ctl:led_level_set(col, row, 12 * blink)
   end
 
+  -- Voice level display
   for i = 1, VOICES do
     if voice_levels[i] > 0 then
       grid_voc:led_level_row(1, i + voices_start_row - 1, display_voice(positions[i], 16))
     end
   end
 
+  -- Semitone and octave row display
   local value
   if alt then
     value = params:get(selected_voice .. "octaves")
@@ -602,6 +626,7 @@ function grid_refresh()
     grid_ctl:led_level_set(9, semitone_row, 15)
   end
 
+  -- Speed display in control row
   local speed = params:get(selected_voice .. "speed")
   local max_brightness = 15
 
@@ -628,6 +653,7 @@ function grid_refresh()
   end
   grid_ctl:led_level_set(9, control_row, 1)
 
+  -- Direction, hold, granular, mute, record indicators in control row
   local direction = params:get(selected_voice .. "direction") >= 0 and 1 or -1
   grid_ctl:led_level_set(7, control_row, direction == -1 and 15 or 8)
 
@@ -640,33 +666,79 @@ function grid_refresh()
   grid_ctl:led_level_set(3, control_row, mute == 1 and 12 or 5)
   grid_ctl:led_level_set(5, control_row, record == 1 and 15 or 2)
 
+  -- Render and refresh the grid
   local buf = grid_ctl | grid_voc
   buf:render(grid_device)
   grid_device:refresh()
 end
 
+-- Table to store the keys pressed in each row for loop detection
+local loop_keys = {}
+
 function grid_key(x, y, z, skip_record)
+  -- Check if we're within the voice rows (for loop functionality)
+  if y >= voices_start_row and y < control_row then
+    local voice = y - (voices_start_row - 1)
+
+    -- Handle key press (z == 1)
+    if z == 1 then
+      -- Initialize loop_keys for the voice if needed
+      if not loop_keys[voice] then
+        loop_keys[voice] = {}
+      end
+
+      -- Add key position to loop_keys table
+      table.insert(loop_keys[voice], x)
+
+      -- If exactly two keys are pressed and held simultaneously
+      if #loop_keys[voice] == 2 then
+        -- Sort keys to determine start and end
+        table.sort(loop_keys[voice])
+        local start_key, end_key = loop_keys[voice][1] - 1, loop_keys[voice][2] - 1
+
+        -- Set loop points
+        params:set(voice .. "loop_start", start_key / 16)
+        params:set(voice .. "loop_end", end_key / 16)
+        params:set(voice .. "loop_on", 1)
+      end
+    elseif z == 0 then
+      -- Handle key release
+      for i, pos in ipairs(loop_keys[voice] or {}) do
+        if pos == x then
+          table.remove(loop_keys[voice], i)
+          break
+        end
+      end
+
+      -- Clear loop if fewer than two keys are pressed
+      if #loop_keys[voice] < 2 then
+        params:set(voice .. "loop_on", 0)
+      end
+    end
+  end
+
+  -- Original behavior: Record grid events if not skipped
   if (y >= voices_start_row and y <= number_of_rows) and not skip_record then
     record_grid_event(x, y, z)
   end
 
+  -- Original behavior for voice triggering and position setting
   if z == 1 then
     if y >= voices_start_row and y < control_row then
-      -- Handle voice triggering and positioning
       local voice = y - (voices_start_row - 1)
       local new_position = (x - 1) / 16
 
+      -- If alt is pressed and voice is playing, stop it
       if alt and gates[voice] > 0 then
-        -- Stop playback if alt is pressed and the track is playing
         stop_voice(voice)
       else
-        -- Start voice with new position
+        -- Set the position and start the voice
         positions[voice] = new_position
         params:set(voice .. "position", new_position)
         start_voice(voice)
       end
     elseif y == semitone_row then
-      -- Handle semitone changes on the last row
+      -- Handle semitone adjustments
       local semitone_value
       if x > 9 then
         semitone_value = x - 9
@@ -681,7 +753,7 @@ function grid_key(x, y, z, skip_record)
         params:set(selected_voice .. "semitones", semitone_value)
       end
     elseif y == control_row then
-      -- Handle controls on the control row
+      -- Handle control adjustments
       if x == 1 then
         -- Toggle hold on/off
         local hold = params:get(selected_voice .. "hold")
@@ -699,11 +771,11 @@ function grid_key(x, y, z, skip_record)
         local record = params:get(selected_voice .. "record")
         params:set(selected_voice .. "record", record == 0 and 1 or 0)
       elseif x == 7 then
-        -- Toggle between forward and reverse for speed
+        -- Toggle direction (forward/reverse)
         local direction = params:get(selected_voice .. "direction")
         params:set(selected_voice .. "direction", direction == 1 and -1 or 1)
       else
-        -- Handle speed changes
+        -- Speed control
         local index = x - 8
         if index >= 1 and index <= #speed_display_values then
           local speed_value = speed_display_values[index]
@@ -712,6 +784,7 @@ function grid_key(x, y, z, skip_record)
         end
       end
     else
+      -- Topbar and arc selection handling
       topbar_key(x, y, z)
     end
   else
@@ -723,12 +796,13 @@ function grid_key(x, y, z, skip_record)
       end
     end
 
-    -- Release alt if necessary
+    -- Release alt mode if necessary
     if x == 16 and y == top_row then
       alt = false
     end
   end
 
+  -- Refresh screen for any updates
   redraw()
 end
 
@@ -1036,7 +1110,7 @@ end
 function init_voice_params()
   for v = 1, VOICES do
     params:add_separator("VOICE " .. v)
-    params:add_group("AUDIO", 32)
+    params:add_group("AUDIO", 36)
 
     init_playback_control_params(v)
     init_level_and_send_params(v)
@@ -1129,6 +1203,25 @@ function init_playback_control_params(v)
     engine.save_buffer(v, filepath)
     params:set(v .. "sample", filepath)
   end)
+
+  params:add_separator("LOOPING")
+
+  params:add_binary(v .. "loop_on", "Loop On", "toggle", 0)
+  params:set_action(v .. "loop_on", function(value)
+    if value == 0 then
+      engine.loop_start(v, 0)
+      engine.loop_end(v, 1)
+    else
+      engine.loop_start(v, params:get(v .. "loop_start"))
+      engine.loop_end(v, params:get(v .. "loop_end"))
+    end
+  end)
+
+  params:add_taper(v .. "loop_start", "Loop Start", 0, 1, 0, 0)
+  params:set_action(v .. "loop_start", function(value) engine.loop_start(v, value) end)
+
+  params:add_taper(v .. "loop_end", "Loop End", 0, 1, 1, 0)
+  params:set_action(v .. "loop_end", function(value) engine.loop_end(v, value) end)
 end
 
 function init_level_and_send_params(v)
