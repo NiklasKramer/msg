@@ -141,7 +141,6 @@ for i = 1, STATES do
   state_led_levels[i] = 0
 end
 
-
 local LFO_TARGETS = {
   SIZE = 1,
   DENSITY = 2,
@@ -240,8 +239,6 @@ local function record_grid_event(x, y, z)
   end
 end
 
-
-
 local function record_arc_event(n, d)
   local current_arc_params = {
     {
@@ -278,8 +275,6 @@ local function record_arc_event(n, d)
     end
   end
 end
-
-
 
 local function start_playback(n)
   pattern_timers[n]:start(0.001, 1) -- TODO: timer doesn't start immediately with zero
@@ -327,8 +322,7 @@ local function stop_recording()
   record_prevtime = -1
 end
 
-
-function playback_arc_event(arc1_params, arc2_params, arc3_params, voice)
+local function playback_arc_event(arc1_params, arc2_params, arc3_params, voice)
   if arc1_params[1] ~= nil then params:set(voice .. "position", arc1_params[1]) end
   if arc1_params[2] ~= nil then params:set(voice .. "speed", arc1_params[2]) end
   if arc1_params[3] ~= nil then params:set(voice .. "size", arc1_params[3]) end
@@ -409,7 +403,6 @@ local function playback_grid_event(event)
     selected_voice = original_voice
   end
 end
-
 
 local function pattern_next(n)
   local grid_bank = grid_pattern_banks[n]
@@ -520,6 +513,7 @@ local function stop_voice(voice)
   arc_dirty = true
 end
 
+-- GRID REFRESH
 function grid_refresh()
   if grid_device == nil then
     return
@@ -532,7 +526,7 @@ function grid_refresh()
   grid_ctl:led_level_set(16, top_row, alt and 15 or 8)
 
   -- Low brightness for loop area
-  local loop_brightness = 3
+  local loop_brightness = 2
 
   for i = 1, VOICES do
     local voice_level = 1
@@ -551,7 +545,7 @@ function grid_refresh()
     end
 
     -- Loop area display: only if loop is on for this voice
-    if params:get(i .. "loop_on") == 1 then
+    if params:get(i .. "loop_on") == 1 and params:get(i .. "granular") then
       local loop_start = params:get(i .. "loop_start") * 16 + 1
       local loop_end = params:get(i .. "loop_end") * 16 + 1
       local loop_row = voices_start_row - 1 + i
@@ -672,137 +666,26 @@ function grid_refresh()
   grid_device:refresh()
 end
 
--- Table to store the keys pressed in each row for loop detection
-local loop_keys = {}
-
+-- GRID KEY
 function grid_key(x, y, z, skip_record)
-  -- Check if we're within the voice rows (for loop functionality)
-  if y >= voices_start_row and y < control_row then
-    local voice = y - (voices_start_row - 1)
-
-    -- Handle key press (z == 1)
-    if z == 1 then
-      -- Initialize loop_keys for the voice if needed
-      if not loop_keys[voice] then
-        loop_keys[voice] = {}
-      end
-
-      -- Add key position to loop_keys table
-      table.insert(loop_keys[voice], x)
-
-      -- If exactly two keys are pressed and held simultaneously
-      if #loop_keys[voice] == 2 then
-        -- Sort keys to determine start and end
-        table.sort(loop_keys[voice])
-        local start_key, end_key = loop_keys[voice][1] - 1, loop_keys[voice][2] - 1
-
-        -- Set loop points
-        params:set(voice .. "loop_start", start_key / 16)
-        params:set(voice .. "loop_end", end_key / 16)
-        params:set(voice .. "loop_on", 1)
-      end
-    elseif z == 0 then
-      -- Handle key release
-      for i, pos in ipairs(loop_keys[voice] or {}) do
-        if pos == x then
-          table.remove(loop_keys[voice], i)
-          break
-        end
-      end
-
-      -- Clear loop if fewer than two keys are pressed
-      if #loop_keys[voice] < 2 then
-        params:set(voice .. "loop_on", 0)
-      end
-    end
-  end
-
-  -- Original behavior: Record grid events if not skipped
   if (y >= voices_start_row and y <= number_of_rows) and not skip_record then
     record_grid_event(x, y, z)
   end
 
-  -- Original behavior for voice triggering and position setting
-  if z == 1 then
-    if y >= voices_start_row and y < control_row then
-      local voice = y - (voices_start_row - 1)
-      local new_position = (x - 1) / 16
+  handle_voice_trigger(x, y, z)
+  local granular_on = params:get(selected_voice .. "granular") == 1
+  if granular_on then handle_voice_loop(x, y, z) end
+  handle_semitone_and_octave_adjustments(x, y, z)
+  handle_control_adjustments(x, y, z)
 
-      -- If alt is pressed and voice is playing, stop it
-      if alt and gates[voice] > 0 then
-        stop_voice(voice)
-      else
-        -- Set the position and start the voice
-        positions[voice] = new_position
-        params:set(voice .. "position", new_position)
-        start_voice(voice)
-      end
-    elseif y == semitone_row then
-      -- Handle semitone adjustments
-      local semitone_value
-      if x > 9 then
-        semitone_value = x - 9
-      elseif x == 9 or x == 8 then
-        semitone_value = 0
-      else
-        semitone_value = x - 8
-      end
-      if alt then
-        params:set(selected_voice .. "octaves", semitone_value)
-      else
-        params:set(selected_voice .. "semitones", semitone_value)
-      end
-    elseif y == control_row then
-      -- Handle control adjustments
-      if x == 1 then
-        -- Toggle hold on/off
-        local hold = params:get(selected_voice .. "hold")
-        params:set(selected_voice .. "hold", hold == 0 and 1 or 0)
-      elseif x == 2 then
-        -- Toggle between buffer and granular mode
-        local granular = params:get(selected_voice .. "granular")
-        params:set(selected_voice .. "granular", granular == 0 and 1 or 0)
-      elseif x == 3 then
-        -- Toggle mute on/off
-        local mute = params:get(selected_voice .. "mute")
-        params:set(selected_voice .. "mute", mute == 0 and 1 or 0)
-      elseif x == 5 then
-        -- Toggle record on/off
-        local record = params:get(selected_voice .. "record")
-        params:set(selected_voice .. "record", record == 0 and 1 or 0)
-      elseif x == 7 then
-        -- Toggle direction (forward/reverse)
-        local direction = params:get(selected_voice .. "direction")
-        params:set(selected_voice .. "direction", direction == 1 and -1 or 1)
-      else
-        -- Speed control
-        local index = x - 8
-        if index >= 1 and index <= #speed_display_values then
-          local speed_value = speed_display_values[index]
-          local direction = params:get(selected_voice .. "speed") > 0 and 1 or -1
-          params:set(selected_voice .. "speed", speed_value * direction)
-        end
-      end
-    else
-      -- Topbar and arc selection handling
+  if z == 1 then
+    if y == top_row or y == arc_selection_row then
       topbar_key(x, y, z)
     end
-  else
-    if y >= voices_start_row and y < control_row then
-      -- Stop voice if hold is not active
-      local voice = y - (voices_start_row - 1)
-      if params:get(voice .. "hold") == 0 then
-        stop_voice(voice)
-      end
-    end
-
-    -- Release alt mode if necessary
-    if x == 16 and y == top_row then
-      alt = false
-    end
+  elseif x == 16 and y == top_row then
+    alt = false
   end
 
-  -- Refresh screen for any updates
   redraw()
 end
 
@@ -833,6 +716,106 @@ function topbar_key(x, y, z)
         else
           selected_voice = x + 4 * (y - 1)
         end
+      end
+    end
+  end
+end
+
+function handle_voice_loop(x, y, z)
+  if y >= voices_start_row and y < control_row then
+    local voice = y - (voices_start_row - 1)
+
+    if z == 1 then
+      if not loop_keys[voice] then
+        loop_keys[voice] = {}
+      end
+      table.insert(loop_keys[voice], x)
+
+      if #loop_keys[voice] == 2 then
+        table.sort(loop_keys[voice])
+        local start_key, end_key = loop_keys[voice][1] - 1, loop_keys[voice][2] - 1
+
+        params:set(voice .. "loop_start", start_key / 16)
+        params:set(voice .. "loop_end", end_key / 16)
+        params:set(voice .. "loop_on", 1)
+      end
+    elseif z == 0 then
+      for i, pos in ipairs(loop_keys[voice] or {}) do
+        if pos == x then
+          table.remove(loop_keys[voice], i)
+          break
+        end
+      end
+    end
+  end
+end
+
+function handle_voice_trigger(x, y, z)
+  if z == 1 then
+    if y >= voices_start_row and y < control_row then
+      local voice = y - (voices_start_row - 1)
+      selected_voice = voice
+      params:set(voice .. "loop_on", 0)
+      local new_position = (x - 1) / 16
+      if alt and gates[voice] > 0 then
+        stop_voice(voice)
+      else
+        positions[voice] = new_position
+        params:set(voice .. "position", new_position)
+        start_voice(voice)
+      end
+    end
+  else
+    if y >= voices_start_row and y < control_row then
+      local voice = y - (voices_start_row - 1)
+      if params:get(voice .. "hold") == 0 then
+        stop_voice(voice)
+      end
+    end
+  end
+end
+
+function handle_semitone_and_octave_adjustments(x, y, z)
+  if y == semitone_row then
+    local semitone_value
+    if x > 9 then
+      semitone_value = x - 9
+    elseif x == 9 or x == 8 then
+      semitone_value = 0
+    else
+      semitone_value = x - 8
+    end
+    if alt then
+      params:set(selected_voice .. "octaves", semitone_value)
+    else
+      params:set(selected_voice .. "semitones", semitone_value)
+    end
+  end
+end
+
+function handle_control_adjustments(x, y, z)
+  if y == control_row and z == 1 then
+    if x == 1 then
+      local hold = params:get(selected_voice .. "hold")
+      params:set(selected_voice .. "hold", hold == 0 and 1 or 0)
+    elseif x == 2 then
+      local granular = params:get(selected_voice .. "granular")
+      params:set(selected_voice .. "granular", granular == 0 and 1 or 0)
+    elseif x == 3 then
+      local mute = params:get(selected_voice .. "mute")
+      params:set(selected_voice .. "mute", mute == 0 and 1 or 0)
+    elseif x == 5 then
+      local record = params:get(selected_voice .. "record")
+      params:set(selected_voice .. "record", record == 0 and 1 or 0)
+    elseif x == 7 then
+      local direction = params:get(selected_voice .. "direction")
+      params:set(selected_voice .. "direction", direction == 1 and -1 or 1)
+    else
+      local index = x - 8
+      if index >= 1 and index <= #speed_display_values then
+        local speed_value = speed_display_values[index]
+        local direction = params:get(selected_voice .. "speed") > 0 and 1 or -1
+        params:set(selected_voice .. "speed", speed_value * direction)
       end
     end
   end
