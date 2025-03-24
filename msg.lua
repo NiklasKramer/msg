@@ -201,19 +201,6 @@ function init()
   params:bang()
 end
 
-function add_lfo_target_param(voice, lfo_num)
-  local options = {}
-  for i, option in ipairs(LFO_TARGET_OPTIONS) do
-    table.insert(options, option[1])
-  end
-
-  local param_id = voice .. "_lfo" .. lfo_num .. "_target"
-  params:add_option(param_id, "LFO " .. lfo_num .. " Target", options, 1)
-  params:set_action(param_id, function(value)
-    update_lfo_ranges()
-  end)
-end
-
 local function record_grid_event(x, y, z)
   if record_bank > 0 then
     local current_time = util.time()
@@ -1075,19 +1062,6 @@ function init_global_and_hidden_params()
   end
 end
 
-function add_lfo_target_param(voice, lfo_num)
-  local options = {}
-  for i, option in ipairs(LFO_TARGET_OPTIONS) do
-    table.insert(options, option[1])
-  end
-
-  local param_id = voice .. "_lfo" .. lfo_num .. "_target"
-  params:add_option(param_id, "LFO " .. lfo_num .. " Target", options, 1)
-  params:set_action(param_id, function(value)
-    update_lfo_ranges()
-  end)
-end
-
 -- INIT BASIC VOICE PARAMS
 function init_voice_params()
   for v = 1, VOICES do
@@ -1267,6 +1241,19 @@ function init_granular_params(v)
   params:set_action(v .. "spread", function(value) engine.spread(v, value / 100) end)
 end
 
+function add_lfo_target_param(voice, lfo_num)
+  local options = {}
+  for i, option in ipairs(LFO_TARGET_OPTIONS) do
+    table.insert(options, option[1])
+  end
+
+  local param_id = voice .. "_lfo" .. lfo_num .. "_target"
+  params:add_option(param_id, "LFO " .. lfo_num .. " Target", options, 1)
+  params:set_action(param_id, function(value)
+    update_lfo_ranges()
+  end)
+end
+
 function init_env_and_lfo_params(v)
   params:add_group("ENVELOPE", 5)
 
@@ -1396,22 +1383,6 @@ function update_arc_display()
 end
 
 -- ENCODERS AND KEYS
-function enc(n, d)
-  if n == 1 then
-    if screen_mode_b then
-      screen_mode = util.clamp(screen_mode + d, 1, total_screens)
-    else
-      selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1, #get_param_list(screen_mode))
-    end
-    screen_mode = util.clamp(screen_mode + d, 1, total_screens)
-  elseif n == 2 then
-    selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1, #get_param_list(screen_mode))
-  elseif n == 3 then
-    local param_list = get_param_list(screen_mode)
-    params:delta(param_list[selected_param[screen_mode]], d)
-  end
-  redraw()
-end
 
 function get_param_list(screen_mode)
   if screen_mode == 1 and screen_mode_b then
@@ -1436,6 +1407,9 @@ end
 -- Define variables for buffer update and save states
 local updating_buffer = false
 local saving_buffer = false
+
+
+-- ████ SCREEN RENDER FUNCTIONS ████
 
 function key(n, z)
   if screen_mode == 1 and screen_mode_b then
@@ -1585,7 +1559,7 @@ function redraw_screen_1()
     local y = 0 + i * 10
     screen.move(35, y)
     screen.level(i == selected_param[1] and 15 or 2)
-    -- filer out the voice number from the param name
+    -- filter out the voice number from the param name
     local param_name = string.sub(param, 2)
     screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
   end
