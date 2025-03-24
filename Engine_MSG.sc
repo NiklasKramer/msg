@@ -109,7 +109,7 @@ Engine_MSG : CroneEngine {
 		buffers = Array.fill(nvoices, { arg i;
 			[Buffer.alloc(
 				context.server,
-				context.server.sampleRate * 1,
+				context.server.sampleRate * 10,
 			)];
 		});
 
