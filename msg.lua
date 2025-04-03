@@ -1388,9 +1388,10 @@ function update_arc_display()
     else
       local loop_start = params:get(selected_voice .. "loop_start")
       local loop_end = params:get(selected_voice .. "loop_end")
-      arc_utils.display_progress_bar(arc_device, 2, loop_start, 0, 1)
-      arc_utils.display_progress_bar(arc_device, 3, loop_end, 0, 1)
-      arc_utils.display_spread_pattern(arc_device, 4, loop_end - loop_start, 0, 1)
+      local playhead = positions[selected_voice] or 0
+      arc_utils.display_loop_start_params(arc_device, 2, loop_start, playhead)
+      arc_utils.display_loop_end_params(arc_device, 3, loop_end, playhead)
+      arc_utils.display_loop_length_params(arc_device, 4, loop_start, loop_end)
     end
   elseif selected_arc == 2 then
     -- Display parameters for arc screen mode

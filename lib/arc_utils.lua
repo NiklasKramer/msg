@@ -177,6 +177,96 @@ local function display_panning_value(arc_device, encoder, value, min, max)
     end
 end
 
+-- Display loop information: start, end, and playhead position
+local function display_loop_params(arc_device, encoder, loop_start, loop_end, playhead)
+    local total_leds = 64
+    local start_led = math.floor(loop_start * total_leds) + 1
+    local end_led = math.floor(loop_end * total_leds) + 1
+    local playhead_led = playhead and (math.floor(playhead * total_leds) + 1) or nil
+
+    for led = 1, total_leds do
+        arc_device:led(encoder, led, 0)
+    end
+
+    for led = start_led, end_led do
+        arc_device:led(encoder, led, 5)
+    end
+
+    arc_device:led(encoder, playhead_led, 15)
+end
+
+-- Display only loop start position
+local function display_loop_start_params(arc_device, encoder, loop_start, loop_end, playhead)
+    local total_leds = 64
+    local start_led = math.floor(loop_start * total_leds) + 1
+    local end_led = math.floor(loop_end * total_leds) + 1
+    local playhead_led = playhead and (math.floor(playhead * total_leds) + 1) or nil
+
+    for led = 1, total_leds do
+        arc_device:led(encoder, led, 0)
+    end
+
+    local loop_active = not (loop_start == 0 and loop_end == 1)
+
+    if loop_active then
+        -- Draw loop region
+        if start_led <= end_led then
+            for led = start_led, end_led do
+                arc_device:led(encoder, led, 5)
+            end
+        else
+            for led = start_led, total_leds do
+                arc_device:led(encoder, led, 5)
+            end
+            for led = 1, end_led do
+                arc_device:led(encoder, led, 5)
+            end
+        end
+        -- Highlight loop start
+        arc_device:led(encoder, start_led, 15)
+    end
+
+    -- Show playhead
+    if playhead_led then
+        local in_loop = false
+        if loop_active then
+            if start_led <= end_led then
+                in_loop = playhead_led >= start_led and playhead_led <= end_led
+            else
+                in_loop = playhead_led >= start_led or playhead_led <= end_led
+            end
+        end
+        arc_device:led(encoder, playhead_led, in_loop and 10 or 2)
+    end
+end
+
+-- Display only loop end position
+local function display_loop_end_params(arc_device, encoder, loop_end)
+    local total_leds = 64
+    local end_led = math.floor(loop_end * total_leds) + 1
+
+    for led = 1, total_leds do
+        arc_device:led(encoder, led, 0)
+    end
+
+    arc_device:led(encoder, end_led, 15)
+end
+
+-- Display loop length as a bar from start to end
+local function display_loop_length_params(arc_device, encoder, loop_start, loop_end)
+    local total_leds = 64
+    local start_led = math.floor(loop_start * total_leds) + 1
+    local end_led = math.floor(loop_end * total_leds) + 1
+
+    for led = 1, total_leds do
+        arc_device:led(encoder, led, 0)
+    end
+
+    for led = start_led, end_led do
+        arc_device:led(encoder, led, 12)
+    end
+end
+
 -- Export the functions
 return {
     display_percent_markers = display_percent_markers,
@@ -189,4 +279,8 @@ return {
     display_panning_value = display_panning_value,
     normalize_param_value = normalize_param_value,
     scale_angle = scale_angle,
+    display_loop_params = display_loop_params,
+    display_loop_start_params = display_loop_start_params,
+    display_loop_end_params = display_loop_end_params,
+    display_loop_length_params = display_loop_length_params,
 }
