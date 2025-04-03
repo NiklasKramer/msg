@@ -814,6 +814,12 @@ function setup_grid_key()
   arc_device.delta = function(n, d)
     arc_enc_update(n, d)
   end
+  arc_device.key = function(n, z)
+    if n == 1 and z == 1 then
+      selected_arc = selected_arc + 1
+      if selected_arc > 3 then selected_arc = 1 end
+    end
+  end
 end
 
 -- INIT
