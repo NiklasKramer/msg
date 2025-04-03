@@ -224,6 +224,7 @@ local function display_loop_start_params(arc_device, encoder, loop_start, loop_e
         end
         -- Highlight loop start
         arc_device:led(encoder, start_led, 15)
+        arc_device:led(encoder, end_led, 10)
     end
 
     -- Show playhead
@@ -241,15 +242,19 @@ local function display_loop_start_params(arc_device, encoder, loop_start, loop_e
 end
 
 -- Display only loop end position
-local function display_loop_end_params(arc_device, encoder, loop_end)
+local function display_loop_end_params(arc_device, encoder, loop_start, loop_end, playhead)
     local total_leds = 64
     local end_led = math.floor(loop_end * total_leds) + 1
+    local start_led = math.floor(loop_start * total_leds) + 1
+    local playhead_led = math.floor(playhead * total_leds) + 1
 
     for led = 1, total_leds do
         arc_device:led(encoder, led, 0)
     end
 
     arc_device:led(encoder, end_led, 15)
+    arc_device:led(encoder, playhead_led, 2)
+    arc_device:led(encoder, start_led, 10)
 end
 
 -- Display loop length as a bar from start to end

@@ -852,7 +852,7 @@ function init_metros()
   end, 1 / 60)
   metro_swell:start()
 
-  local metro_redraw = metro.init(function(stage) redraw() end, 1 / 60)
+  local metro_redraw = metro.init(function(stage) redraw() end, 1 / 10)
   metro_redraw:start()
 
   local metro_arc_update = metro.init(function(stage)
@@ -1324,7 +1324,15 @@ function arc_enc_update(n, d)
 
   local granular = params:get(selected_voice .. "granular") == 0
 
-  if not granular then
+  if n == 1 then
+    local newPosition = positions[selected_voice] + (adjusted_delta / 100)
+    newPosition = newPosition % 1
+    positions[selected_voice] = newPosition
+    params:set(param_id, newPosition)
+    return
+  end
+
+  if not granular and selected_arc == 1 then
     local loop_start_id = selected_voice .. "loop_start"
     local loop_end_id = selected_voice .. "loop_end"
 
@@ -1351,12 +1359,7 @@ function arc_enc_update(n, d)
     end
   else
     -- existing granular logic
-    if param_name == "position" then
-      local newPosition = positions[selected_voice] + (adjusted_delta / 100)
-      newPosition = newPosition % 1
-      positions[selected_voice] = newPosition
-      params:set(param_id, newPosition)
-    elseif param_name == "semitones" then
+    if param_name == "semitones" then
       local semitones_precise = params:get(selected_voice .. "semitones_precise")
       semitones_precise = semitones_precise + adjusted_delta
       params:set(selected_voice .. "semitones_precise", semitones_precise)
@@ -1372,14 +1375,14 @@ end
 function update_arc_display()
   if selected_arc == 1 then
     local granular = params:get(selected_voice .. "granular") == 0
+    local position = positions[selected_voice]
+    local position_angle = arc_utils.scale_angle(position, 1)
+    arc_device:segment(1, position_angle, position_angle + 0.2, 15)
+
     if granular then
-      local position = positions[selected_voice]
       local speed = params:get(selected_voice .. "speed")
       local size = params:get(selected_voice .. "size")
       local density = params:get(selected_voice .. "density")
-
-      local position_angle = arc_utils.scale_angle(position, 1)
-      arc_device:segment(1, position_angle, position_angle + 0.2, 15)
 
       arc_utils.display_progress_bar(arc_device, 2, speed, min_speed, max_speed)
       arc_utils.display_percent_markers(arc_device, 2, -100, 0, 100)
@@ -1389,8 +1392,9 @@ function update_arc_display()
       local loop_start = params:get(selected_voice .. "loop_start")
       local loop_end = params:get(selected_voice .. "loop_end")
       local playhead = positions[selected_voice] or 0
-      arc_utils.display_loop_start_params(arc_device, 2, loop_start, playhead)
-      arc_utils.display_loop_end_params(arc_device, 3, loop_end, playhead)
+      arc_utils.display_loop_start_params(arc_device, 2, loop_start, loop_end, playhead)
+      arc_utils.display_loop_end_params(arc_device, 3, loop_start, loop_end, playhead)
+
       arc_utils.display_loop_length_params(arc_device, 4, loop_start, loop_end)
     end
   elseif selected_arc == 2 then
