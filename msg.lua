@@ -855,7 +855,7 @@ function init_metros()
       swell = 3
       swell_direction = 1
     end
-  end, 1 / 60)
+  end, 1 / 30)
   metro_swell:start()
 
   local metro_redraw = metro.init(function(stage) redraw() end, 1 / 10)
@@ -863,7 +863,7 @@ function init_metros()
 
   local metro_arc_update = metro.init(function(stage)
     update_arc_display()
-  end, 1 / 60)
+  end, 1 / 30)
   metro_arc_update:start()
 end
 
@@ -1398,8 +1398,11 @@ function update_arc_display()
       local loop_start = params:get(selected_voice .. "loop_start")
       local loop_end = params:get(selected_voice .. "loop_end")
       local playhead = positions[selected_voice] or 0
-      arc_utils.display_loop_start_params(arc_device, 2, loop_start, loop_end, playhead)
-      arc_utils.display_loop_end_params(arc_device, 3, loop_start, loop_end, playhead)
+      local loop_active = params:get(selected_voice .. "loop_on") == 1
+
+
+      arc_utils.display_loop_start_params(arc_device, 2, loop_start, loop_end, playhead, loop_active)
+      arc_utils.display_loop_end_params(arc_device, 3, loop_start, loop_end, playhead, loop_active)
 
       arc_utils.display_loop_length_params(arc_device, 4, loop_start, loop_end)
     end
