@@ -15,9 +15,12 @@ local arc_device = arc.connect()
 -- Arc screen mode
 -- local arc_alt_mode = false
 local selected_arc = 1
-local arc1_params = { "position", "speed", "size", "density" }
-local arc2_params = { "volume", "spread", "jitter", "filter" }
-local arc3_params = { "filterbank", "saturation", "reverb", "delay" }
+local arc_params = {
+  [1] = { "position", "speed", "size", "density" },
+  [2] = { "volume", "spread", "jitter", "filter" },
+  [3] = { "filterbank", "saturation", "reverb", "delay" },
+  [4] = { "position", "loop_start", "loop_end", "loop_start" }
+}
 local speed_display_values = { 0, 12.5, 25, 50, 100, 200, 400, 800 }
 
 -- Global screen mode variable
@@ -35,12 +38,9 @@ local selected_voice = 1
 local VOICES = 8
 local RECORDER = 18
 local STATES = 16
-local current_screen = 1
 
 -- Parameter lists for each screen
-local audio_params = { selected_voice .. "volume", selected_voice .. "pan", selected_voice .. "filterbank",
-  selected_voice ..
-  "saturation", selected_voice .. "reverb", selected_voice .. "delay" }
+
 local filterbank_params = { "filterbank_q", "filterbank_reverb", "filterbank_delay", "filterbank_saturation" }
 local saturation_params = { "saturation_depth", "saturation_rate", "crossover", "dist", "cutoff" }
 local delay_params = { "delay_time", "delay_feedback", "delay_lpf", "delay_hpf", "delay_w_depth" }
@@ -49,7 +49,6 @@ local reverb_params = { "reverb_mix", "reverb_time", "reverb_lpf", "reverb_hpf",
 -- grid rows
 local control_row = 15
 local semitone_row = 16
-local state_row = 14
 local voices_start_row = 3  -- This assumes voices start from row 3, adjust as needed
 local top_row = 1           -- The top row, often used for special controls like `alt`
 local arc_selection_row = 2 -- Row for selecting arc modes
@@ -69,6 +68,8 @@ for i = 1, VOICES do
   gates[i] = 0
   voice_levels[i] = 0
 end
+
+
 
 -- Grid display buffers
 local gridbuf = require 'lib/gridbuf'
@@ -227,28 +228,16 @@ local function record_grid_event(x, y, z)
 end
 
 local function record_arc_event(n, d)
-  local current_arc_params = {
-    {
-      params:get(selected_voice .. arc1_params[1]),
-      params:get(selected_voice .. arc1_params[2]),
-      params:get(selected_voice .. arc1_params[3]),
-      params:get(selected_voice .. arc1_params[4]) },
+  local current_arc_params = {}
+  for i = 1, 4 do
+    current_arc_params[i] = {}
+    for j = 1, 4 do
+      current_arc_params[i][j] = params:get(selected_voice .. arc_params[i][j])
+    end
+  end
 
-    {
-      params:get(selected_voice .. arc2_params[1]),
-      params:get(selected_voice .. arc2_params[2]),
-      params:get(selected_voice .. arc2_params[3]),
-      params:get(selected_voice .. arc2_params[4]) },
-
-    {
-      params:get(selected_voice .. arc3_params[1]),
-      params:get(selected_voice .. arc3_params[2]),
-      params:get(selected_voice .. arc3_params[3]),
-      params:get(selected_voice .. arc3_params[4]) }
-  }
-
-  local arc_params = { {}, {}, {} }
-  arc_params[selected_arc][n] = current_arc_params[selected_arc][n]
+  local arc_snapshot = { {}, {}, {}, {} }
+  arc_snapshot[selected_arc][n] = current_arc_params[selected_arc][n]
 
   if record_bank > 0 then
     local current_time = util.time()
@@ -257,7 +246,7 @@ local function record_arc_event(n, d)
     if d ~= 0 then
       local time_delta = current_time - record_prevtime
       table.insert(arc_pattern_banks[record_bank],
-        { time_delta, 'arc', arc_params[1], arc_params[2], arc_params[3], selected_voice })
+        { time_delta, 'arc', arc_snapshot, selected_voice })
       record_prevtime = current_time
     end
   end
@@ -309,21 +298,14 @@ local function stop_recording()
   record_prevtime = -1
 end
 
-local function playback_arc_event(arc1_params, arc2_params, arc3_params, voice)
-  if arc1_params[1] ~= nil then params:set(voice .. "position", arc1_params[1]) end
-  if arc1_params[2] ~= nil then params:set(voice .. "speed", arc1_params[2]) end
-  if arc1_params[3] ~= nil then params:set(voice .. "size", arc1_params[3]) end
-  if arc1_params[4] ~= nil then params:set(voice .. "density", arc1_params[4]) end
-
-  if arc2_params[1] ~= nil then params:set(voice .. "volume", arc2_params[1]) end
-  if arc2_params[2] ~= nil then params:set(voice .. "spread", arc2_params[2]) end
-  if arc2_params[3] ~= nil then params:set(voice .. "jitter", arc2_params[3]) end
-  if arc2_params[4] ~= nil then params:set(voice .. "filter", arc2_params[4]) end
-
-  if arc3_params[1] ~= nil then params:set(voice .. "filterbank", arc3_params[1]) end
-  if arc3_params[2] ~= nil then params:set(voice .. "saturation", arc3_params[2]) end
-  if arc3_params[3] ~= nil then params:set(voice .. "reverb", arc3_params[3]) end
-  if arc3_params[4] ~= nil then params:set(voice .. "delay", arc3_params[4]) end
+local function playback_arc_event(arc_data, voice)
+  for i = 1, 4 do
+    for j = 1, 4 do
+      if arc_data[i][j] ~= nil then
+        params:set(voice .. arc_params[i][j], arc_data[i][j])
+      end
+    end
+  end
 end
 
 local function playback_grid_event(event)
@@ -402,9 +384,9 @@ local function pattern_next(n)
   if grid_event then
     playback_grid_event(grid_event)
   elseif arc_event then
-    local delta, eventType, arc1_params, arc2_params, arc3_params, voice = table.unpack(arc_event)
+    local delta, eventType, arc_data, voice = table.unpack(arc_event)
     if eventType == 'arc' then
-      playback_arc_event(arc1_params, arc2_params, arc3_params, voice)
+      playback_arc_event(arc_data, voice)
     end
   end
 
@@ -684,7 +666,7 @@ function topbar_key(x, y, z)
     elseif x == 16 and y == arc_selection_row then
       -- Toggle arc screen mode
       selected_arc = selected_arc + 1
-      if selected_arc > 3 then selected_arc = 1 end
+      if selected_arc > 4 then selected_arc = 1 end
     elseif x >= 6 and x <= 14 then
       -- record handler
       local recorder = (x - 6) + 9 * (y - 1) + 1
@@ -817,7 +799,7 @@ function setup_grid_key()
   arc_device.key = function(n, z)
     if n == 1 and z == 1 then
       selected_arc = selected_arc + 1
-      if selected_arc > 3 then selected_arc = 1 end
+      if selected_arc > 4 then selected_arc = 1 end
     end
   end
 end
@@ -1180,10 +1162,14 @@ function init_playback_control_params(v)
   end)
 
   params:add_taper(v .. "loop_start", "Loop Start", 0, 1, 0, 0)
-  params:set_action(v .. "loop_start", function(value) engine.loop_start(v, value) end)
+  params:set_action(v .. "loop_start", function(value)
+    engine.loop_start(v, value)
+  end)
 
   params:add_taper(v .. "loop_end", "Loop End", 0, 1, 1, 0)
-  params:set_action(v .. "loop_end", function(value) engine.loop_end(v, value) end)
+  params:set_action(v .. "loop_end", function(value)
+    engine.loop_end(v, value)
+  end)
 end
 
 function init_level_and_send_params(v)
@@ -1313,22 +1299,11 @@ function arc_enc_update(n, d)
   local sensitivity = params:get("arc_sens_" .. n)
   local adjusted_delta = d * sensitivity
 
-  local param_name = ''
-  if selected_arc == 1 then
-    param_name = arc1_params[n]
-  elseif selected_arc == 2 then
-    param_name = arc2_params[n]
-  elseif selected_arc == 3 then
-    param_name = arc3_params[n]
-  else
-    return
-  end
+  local param_name = arc_params[selected_arc][n]
 
   -- position is a special case
   if not param_name then return end
   local param_id = selected_voice .. param_name
-
-  local granular = params:get(selected_voice .. "granular") == 0
 
   if n == 1 then
     local newPosition = positions[selected_voice] + (adjusted_delta / 100)
@@ -1338,41 +1313,14 @@ function arc_enc_update(n, d)
     return
   end
 
-  if not granular and selected_arc == 1 then
-    local loop_start_id = selected_voice .. "loop_start"
-    local loop_end_id = selected_voice .. "loop_end"
-
-    local loop_start = params:get(loop_start_id)
-    local loop_end = params:get(loop_end_id)
-
-    if n == 2 then
-      loop_start = util.clamp(loop_start + (adjusted_delta / 100), 0, loop_end - 0.01)
-      params:set(loop_start_id, loop_start)
-      if not skip_record then record_arc_event(n, d) end
-    elseif n == 3 then
-      loop_end = util.clamp(loop_end + (adjusted_delta / 100), loop_start + 0.01, 1)
-      params:set(loop_end_id, loop_end)
-      if not skip_record then record_arc_event(n, d) end
-    elseif n == 4 then
-      local offset = adjusted_delta / 100
-      loop_start = util.clamp(loop_start + offset, 0, 1)
-      loop_end = util.clamp(loop_end + offset, 0, 1)
-      if loop_end - loop_start >= 0.01 then
-        params:set(loop_start_id, loop_start)
-        params:set(loop_end_id, loop_end)
-        if not skip_record then record_arc_event(n, d) end
-      end
-    end
+  -- existing granular logic
+  if param_name == "semitones" then
+    local semitones_precise = params:get(selected_voice .. "semitones_precise")
+    semitones_precise = semitones_precise + adjusted_delta
+    params:set(selected_voice .. "semitones_precise", semitones_precise)
+    params:set(param_id, math.floor(semitones_precise))
   else
-    -- existing granular logic
-    if param_name == "semitones" then
-      local semitones_precise = params:get(selected_voice .. "semitones_precise")
-      semitones_precise = semitones_precise + adjusted_delta
-      params:set(selected_voice .. "semitones_precise", semitones_precise)
-      params:set(param_id, math.floor(semitones_precise))
-    else
-      params:delta(param_id, adjusted_delta)
-    end
+    params:delta(param_id, adjusted_delta)
   end
 
   redraw()
@@ -1380,32 +1328,18 @@ end
 
 function update_arc_display()
   if selected_arc == 1 then
-    local granular = params:get(selected_voice .. "granular") == 0
     local position = positions[selected_voice]
     local position_angle = arc_utils.scale_angle(position, 1)
     arc_device:segment(1, position_angle, position_angle + 0.2, 15)
 
-    if granular then
-      local speed = params:get(selected_voice .. "speed")
-      local size = params:get(selected_voice .. "size")
-      local density = params:get(selected_voice .. "density")
+    local speed = params:get(selected_voice .. "speed")
+    local size = params:get(selected_voice .. "size")
+    local density = params:get(selected_voice .. "density")
 
-      arc_utils.display_progress_bar(arc_device, 2, speed, min_speed, max_speed)
-      arc_utils.display_percent_markers(arc_device, 2, -100, 0, 100)
-      arc_utils.display_progress_bar(arc_device, 3, size, min_size, max_size)
-      arc_utils.display_progress_bar(arc_device, 4, density, min_density, max_density)
-    else
-      local loop_start = params:get(selected_voice .. "loop_start")
-      local loop_end = params:get(selected_voice .. "loop_end")
-      local playhead = positions[selected_voice] or 0
-      local loop_active = params:get(selected_voice .. "loop_on") == 1
-
-
-      arc_utils.display_loop_start_params(arc_device, 2, loop_start, loop_end, playhead, loop_active)
-      arc_utils.display_loop_end_params(arc_device, 3, loop_start, loop_end, playhead, loop_active)
-
-      arc_utils.display_loop_length_params(arc_device, 4, loop_start, loop_end)
-    end
+    arc_utils.display_progress_bar(arc_device, 2, speed, min_speed, max_speed)
+    arc_utils.display_percent_markers(arc_device, 2, -100, 0, 100)
+    arc_utils.display_progress_bar(arc_device, 3, size, min_size, max_size)
+    arc_utils.display_progress_bar(arc_device, 4, density, min_density, max_density)
   elseif selected_arc == 2 then
     -- Display parameters for arc screen mode
     local volume = params:get(selected_voice .. "volume")
@@ -1428,6 +1362,18 @@ function update_arc_display()
     arc_utils.display_progress_bar(arc_device, 2, saturation, min_saturation, max_saturation)
     arc_utils.display_progress_bar(arc_device, 3, reverb, min_reverb, max_reverb)
     arc_utils.display_progress_bar(arc_device, 4, delay, min_delay, max_delay)
+  elseif selected_arc == 4 then
+    local position = positions[selected_voice]
+    local position_angle = arc_utils.scale_angle(position, 1)
+    arc_device:segment(1, position_angle, position_angle + 0.2, 15)
+
+    local loop_start = params:get(selected_voice .. "loop_start")
+    local loop_end = params:get(selected_voice .. "loop_end")
+    local playhead = positions[selected_voice] or 0
+    local loop_active = params:get(selected_voice .. "loop_on") == 1
+
+    arc_utils.display_loop_start_params(arc_device, 2, loop_start, loop_end, playhead, loop_active)
+    arc_utils.display_loop_end_params(arc_device, 3, loop_start, loop_end, playhead, loop_active)
   end
 
   arc_device:refresh()
