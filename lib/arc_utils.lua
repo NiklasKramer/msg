@@ -15,6 +15,40 @@ local function scale_angle(value, scale)
     return angle
 end
 
+-- Utility to normalize values
+local function normalize(value, min, max)
+    return (value - min) / (max - min)
+end
+
+-- Utility to convert normalized value to LED position
+local function value_to_led(value)
+    return math.floor(value * 64) + 1
+end
+
+-- Utility to clear all LEDs on an arc encoder
+local function clear_arc(arc_device, encoder)
+    for led = 1, 64 do
+        arc_device:led(encoder, led, 0)
+    end
+end
+
+-- Utility to draw loop region with wraparound
+local function draw_loop_segment(arc_device, encoder, start_led, end_led, brightness)
+    local total_leds = 64
+    if start_led <= end_led then
+        for led = start_led, end_led do
+            arc_device:led(encoder, led, brightness)
+        end
+    else
+        for led = start_led, total_leds do
+            arc_device:led(encoder, led, brightness)
+        end
+        for led = 1, end_led do
+            arc_device:led(encoder, led, brightness)
+        end
+    end
+end
+
 -- Display percent markers on the arc
 local function display_percent_markers(arc_device, encoder, ...)
     local markers = { ... }
@@ -159,9 +193,7 @@ local function display_panning_value(arc_device, encoder, value, min, max)
     local led_position = math.floor((normalized_value - 0.5) * total_leds / 3) + center_led
 
     -- Clear all LEDs first
-    for led = 1, total_leds do
-        arc_device:led(encoder, led, 0)
-    end
+    clear_arc(arc_device, encoder)
 
     -- Light up LEDs based on the value
     if value < 0 then
@@ -185,20 +217,14 @@ local function display_loop_params(arc_device, encoder, loop_start, loop_end, pl
     local playhead_led = playhead and (math.floor(playhead * total_leds) + 1) or nil
 
     if loop_start == 0 and loop_end == 1 then
-        for led = 1, total_leds do
-            arc_device:led(encoder, led, 0)
-        end
+        clear_arc(arc_device, encoder)
         arc_device:refresh()
         return
     end
 
-    for led = 1, total_leds do
-        arc_device:led(encoder, led, 0)
-    end
+    clear_arc(arc_device, encoder)
 
-    for led = start_led, end_led do
-        arc_device:led(encoder, led, 5)
-    end
+    draw_loop_segment(arc_device, encoder, start_led, end_led, 5)
 
     arc_device:led(encoder, playhead_led, 15)
 end
@@ -210,25 +236,11 @@ local function display_loop_start_params(arc_device, encoder, loop_start, loop_e
     local end_led = math.floor(loop_end * total_leds) + 1
     local playhead_led = playhead and (math.floor(playhead * total_leds) + 1) or nil
 
-    for led = 1, total_leds do
-        arc_device:led(encoder, led, 0)
-    end
-
+    clear_arc(arc_device, encoder)
 
     if loop_active then
         -- Draw loop region
-        if start_led <= end_led then
-            for led = start_led, end_led do
-                arc_device:led(encoder, led, 5)
-            end
-        else
-            for led = start_led, total_leds do
-                arc_device:led(encoder, led, 5)
-            end
-            for led = 1, end_led do
-                arc_device:led(encoder, led, 5)
-            end
-        end
+        draw_loop_segment(arc_device, encoder, start_led, end_led, 5)
         -- Highlight loop start
         arc_device:led(encoder, start_led, 15)
         arc_device:led(encoder, end_led, 10)
@@ -255,10 +267,7 @@ local function display_loop_end_params(arc_device, encoder, loop_start, loop_end
     local start_led = math.floor(loop_start * total_leds) + 1
     local playhead_led = math.floor(playhead * total_leds) + 1
 
-
-    for led = 1, total_leds do
-        arc_device:led(encoder, led, 0)
-    end
+    clear_arc(arc_device, encoder)
 
     if loop_active then
         arc_device:led(encoder, end_led, 15)
@@ -275,39 +284,21 @@ local function display_loop_length_params(arc_device, encoder, loop_start, loop_
     local start_led = math.floor(loop_start * total_leds) + 1
     local end_led = math.floor(loop_end * total_leds) + 1
 
-    for led = 1, total_leds do
-        arc_device:led(encoder, led, 0)
-    end
+    clear_arc(arc_device, encoder)
 
-    for led = start_led, end_led do
-        arc_device:led(encoder, led, 12)
-    end
+    draw_loop_segment(arc_device, encoder, start_led, end_led, 12)
 end
 
 -- Display both loop start and end with playhead position
 local function display_loop_segment_params(arc_device, encoder, loop_start, loop_end, playhead, loop_active)
-    local total_leds = 64
-    local start_led = math.floor(loop_start * total_leds) + 1
-    local end_led = math.floor(loop_end * total_leds) + 1
-    local playhead_led = playhead and (math.floor(playhead * total_leds) + 1) or nil
+    local start_led = value_to_led(loop_start)
+    local end_led = value_to_led(loop_end)
+    local playhead_led = playhead and value_to_led(playhead) or nil
 
-    for led = 1, total_leds do
-        arc_device:led(encoder, led, 0)
-    end
+    clear_arc(arc_device, encoder)
 
     if loop_active then
-        if start_led <= end_led then
-            for led = start_led, end_led do
-                arc_device:led(encoder, led, 5)
-            end
-        else
-            for led = start_led, total_leds do
-                arc_device:led(encoder, led, 5)
-            end
-            for led = 1, end_led do
-                arc_device:led(encoder, led, 5)
-            end
-        end
+        draw_loop_segment(arc_device, encoder, start_led, end_led, 5)
         arc_device:led(encoder, start_led, 15)
         arc_device:led(encoder, end_led, 15)
     end
@@ -315,11 +306,8 @@ local function display_loop_segment_params(arc_device, encoder, loop_start, loop
     if playhead_led then
         local in_loop = false
         if loop_active then
-            if start_led <= end_led then
-                in_loop = playhead_led >= start_led and playhead_led <= end_led
-            else
-                in_loop = playhead_led >= start_led or playhead_led <= end_led
-            end
+            in_loop = start_led <= end_led and (playhead_led >= start_led and playhead_led <= end_led)
+                or start_led > end_led and (playhead_led >= start_led or playhead_led <= end_led)
         end
         arc_device:led(encoder, playhead_led, in_loop and 10 or 2)
     end
@@ -343,5 +331,9 @@ return {
     display_loop_start_params = display_loop_start_params,
     display_loop_end_params = display_loop_end_params,
     display_loop_length_params = display_loop_length_params,
-    display_loop_segment_params = display_loop_segment_params
+    display_loop_segment_params = display_loop_segment_params,
+    normalize = normalize,
+    value_to_led = value_to_led,
+    clear_arc = clear_arc,
+    draw_loop_segment = draw_loop_segment
 }

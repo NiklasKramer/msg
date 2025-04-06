@@ -228,32 +228,27 @@ local function record_grid_event(x, y, z)
 end
 
 local function record_arc_event(n, d)
-  local current_arc_params = {}
-  for i = 1, 4 do
-    current_arc_params[i] = {}
-    for j = 1, 4 do
-      current_arc_params[i][j] = params:get(selected_voice .. arc_params[i][j])
-    end
-  end
+  if record_bank <= 0 then return end
 
   local arc_snapshot = { {}, {}, {}, {} }
+  local current_time = util.time()
+  record_prevtime = record_prevtime < 0 and current_time or record_prevtime
+
   if selected_arc == 4 and n == 4 then
     arc_snapshot[4][2] = params:get(selected_voice .. "loop_start")
     arc_snapshot[4][3] = params:get(selected_voice .. "loop_end")
   else
-    arc_snapshot[selected_arc][n] = current_arc_params[selected_arc][n]
+    local param_name = arc_params[selected_arc][n]
+    if param_name then
+      arc_snapshot[selected_arc][n] = params:get(selected_voice .. param_name)
+    end
   end
 
-  if record_bank > 0 then
-    local current_time = util.time()
-    record_prevtime = record_prevtime < 0 and current_time or record_prevtime
-
-    if d ~= 0 then
-      local time_delta = current_time - record_prevtime
-      table.insert(arc_pattern_banks[record_bank],
-        { time_delta, 'arc', arc_snapshot, selected_voice })
-      record_prevtime = current_time
-    end
+  if d ~= 0 then
+    local time_delta = current_time - record_prevtime
+    table.insert(arc_pattern_banks[record_bank],
+      { time_delta, 'arc', arc_snapshot, selected_voice })
+    record_prevtime = current_time
   end
 end
 
