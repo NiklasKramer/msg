@@ -202,30 +202,20 @@ function init()
   params:bang()
 end
 
-local function record_grid_event(x, y, z)
-  if record_bank > 0 then
-    local current_time = util.time()
-    if record_prevtime < 0 then
-      record_prevtime = current_time
-    end
-
-    local time_delta = current_time - record_prevtime
-    local action_type = nil
-    if y == control_row and x > 5 and z == 1 then
-      action_type = 'control' -- Use a specific action type for the control row
-    elseif y == semitone_row and alt then
-      print("semitone row")
-      action_type = 'octaves'
-    elseif y == semitone_row then
-      action_type = 'semitone'
-    else
-      action_type = 'grid'
-    end
-
-    table.insert(grid_pattern_banks[record_bank], { time_delta, action_type, x, y, z, selected_voice })
-    record_prevtime = current_time
-  end
+local function with_voice(voice, fn)
+  local original = selected_voice
+  selected_voice = voice
+  fn()
+  selected_voice = original
 end
+
+local function record_pattern(bank, event_data)
+  local current_time = util.time()
+  local delta = current_time - (record_prevtime > 0 and record_prevtime or current_time)
+  table.insert(bank[record_bank], { delta, table.unpack(event_data) })
+  record_prevtime = current_time
+end
+
 
 local function record_arc_event(n, d)
   if record_bank <= 0 then return end
@@ -246,9 +236,7 @@ local function record_arc_event(n, d)
 
   if d ~= 0 then
     local time_delta = current_time - record_prevtime
-    table.insert(arc_pattern_banks[record_bank],
-      { time_delta, 'arc', arc_snapshot, selected_voice })
-    record_prevtime = current_time
+    record_pattern(arc_pattern_banks, { 'arc', arc_snapshot, selected_voice })
   end
 end
 
@@ -314,62 +302,57 @@ local function playback_grid_event(event)
   if eventType == 'grid' then
     grid_key(x, y, z, true)
   elseif eventType == 'control' then
-    -- Handle control actions based on the recorded voice and action
-    local original_voice = selected_voice
-    selected_voice = voice
-    print("direction", params:get(selected_voice .. "direction"))
-    if y == control_row then
-      if x == 1 then
-        local hold = params:get(selected_voice .. "hold")
-        params:set(selected_voice .. "hold", hold == 0 and 1 or 0)
-      elseif x == 2 then
-        local granular = params:get(selected_voice .. "granular")
-        params:set(selected_voice .. "granular", granular == 0 and 1 or 0)
-      elseif x == 3 then
-        local mute = params:get(selected_voice .. "mute")
-        params:set(selected_voice .. "mute", mute == 0 and 1 or 0)
-      elseif x == 5 then
-        local record = params:get(selected_voice .. "record")
-        params:set(selected_voice .. "record", record == 0 and 1 or 0)
-      elseif x == 7 then
-        local direction = params:get(selected_voice .. "direction") * -1
-        params:set(selected_voice .. "direction", direction)
-      else
-        local index = x - 8
-        if index >= 1 and index <= #speed_display_values then
-          local speed_value = speed_display_values[index]
-          params:set(selected_voice .. "speed", speed_value)
+    with_voice(voice, function()
+      print("direction", params:get(selected_voice .. "direction"))
+      if y == control_row then
+        if x == 1 then
+          local hold = params:get(selected_voice .. "hold")
+          params:set(selected_voice .. "hold", hold == 0 and 1 or 0)
+        elseif x == 2 then
+          local granular = params:get(selected_voice .. "granular")
+          params:set(selected_voice .. "granular", granular == 0 and 1 or 0)
+        elseif x == 3 then
+          local mute = params:get(selected_voice .. "mute")
+          params:set(selected_voice .. "mute", mute == 0 and 1 or 0)
+        elseif x == 5 then
+          local record = params:get(selected_voice .. "record")
+          params:set(selected_voice .. "record", record == 0 and 1 or 0)
+        elseif x == 7 then
+          local direction = params:get(selected_voice .. "direction") * -1
+          params:set(selected_voice .. "direction", direction)
+        else
+          local index = x - 8
+          if index >= 1 and index <= #speed_display_values then
+            local speed_value = speed_display_values[index]
+            params:set(selected_voice .. "speed", speed_value)
+          end
         end
       end
-    end
-    selected_voice = original_voice
+    end)
   elseif eventType == 'semitone' then
-    local original_voice = selected_voice
-    selected_voice = voice
-    local semitone_value
-    if x > 9 then
-      semitone_value = x - 9
-    elseif x == 9 or x == 8 then
-      semitone_value = 0
-    else
-      semitone_value = x - 8
-    end
-
-    params:set(selected_voice .. "semitones", semitone_value)
-    selected_voice = original_voice
+    with_voice(voice, function()
+      local semitone_value
+      if x > 9 then
+        semitone_value = x - 9
+      elseif x == 9 or x == 8 then
+        semitone_value = 0
+      else
+        semitone_value = x - 8
+      end
+      params:set(selected_voice .. "semitones", semitone_value)
+    end)
   elseif eventType == 'octaves' then
-    local original_voice = selected_voice
-    selected_voice = voice
-    local octave_value
-    if x > 9 then
-      octave_value = x - 9
-    elseif x == 9 or x == 8 then
-      octave_value = 0
-    else
-      octave_value = x - 8
-    end
-    params:set(selected_voice .. "octaves", octave_value)
-    selected_voice = original_voice
+    with_voice(voice, function()
+      local octave_value
+      if x > 9 then
+        octave_value = x - 9
+      elseif x == 9 or x == 8 then
+        octave_value = 0
+      else
+        octave_value = x - 8
+      end
+      params:set(selected_voice .. "octaves", octave_value)
+    end)
   end
 end
 
@@ -543,14 +526,9 @@ function grid_refresh()
     grid_ctl:led_level_set(col, row, level)
   end
 
-  -- Arc selection indicator
-  if selected_arc == 1 then
-    grid_ctl:led_level_set(16, arc_selection_row, 1)
-  elseif selected_arc == 2 then
-    grid_ctl:led_level_set(16, arc_selection_row, 9)
-  elseif selected_arc == 3 then
-    grid_ctl:led_level_set(16, arc_selection_row, 15)
-  end
+  -- Arc selection indicator using lookup table
+  local arc_levels = { 1, 9, 15 }
+  grid_ctl:led_level_set(16, arc_selection_row, arc_levels[selected_arc] or 0)
 
   -- Blink indicator for recording bank
   if record_bank > 0 then
@@ -637,8 +615,18 @@ end
 
 -- GRID KEY
 function grid_key(x, y, z, skip_record)
-  if (y >= voices_start_row and y <= number_of_rows) and not skip_record then
-    record_grid_event(x, y, z)
+  if (y >= voices_start_row and y <= number_of_rows) and not skip_record and record_bank > 0 then
+    local event_type
+    if y == control_row and x > 5 and z == 1 then
+      event_type = 'control'
+    elseif y == semitone_row and alt then
+      event_type = 'octaves'
+    elseif y == semitone_row then
+      event_type = 'semitone'
+    else
+      event_type = 'grid'
+    end
+    record_pattern(grid_pattern_banks, { event_type, x, y, z, selected_voice })
   end
 
   handle_voice_trigger(x, y, z)
@@ -1318,8 +1306,10 @@ function arc_enc_update(n, d)
     local position_angle = arc_utils.scale_angle(position, 1)
     arc_device:segment(1, position_angle, position_angle + 0.2, 15)
 
-    local loop_start = params:get(selected_voice .. "loop_start")
-    local loop_end = params:get(selected_voice .. "loop_end")
+    local param_start = selected_voice .. "loop_start"
+    local param_end = selected_voice .. "loop_end"
+    local loop_start = params:get(param_start)
+    local loop_end = params:get(param_end)
     local playhead = positions[selected_voice] or 0
     local loop_active = params:get(selected_voice .. "loop_on") == 1
 
@@ -1330,8 +1320,8 @@ function arc_enc_update(n, d)
     local delta_pos = adjusted_delta / 100
     local new_start = util.clamp(loop_start + delta_pos, 0, 1 - loop_length)
     local new_end = new_start + loop_length
-    params:set(selected_voice .. "loop_start", new_start)
-    params:set(selected_voice .. "loop_end", new_end)
+    params:set(param_start, new_start)
+    params:set(param_end, new_end)
     redraw()
     return
   end
@@ -1425,6 +1415,22 @@ function get_param_list(screen_mode)
   end
 end
 
+local function draw_param_list(title, param_list, selected_index, prefix_strip)
+  screen.move(0, 20)
+  screen.level(15)
+  screen.font_size(24)
+  screen.text(title)
+  screen.font_size(8)
+
+  for i, param in ipairs(param_list) do
+    local y = 0 + i * 10
+    screen.move(35, y)
+    screen.level(i == selected_index and 15 or 2)
+    local param_name = prefix_strip and string.sub(param, prefix_strip) or param
+    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+  end
+end
+
 -- Define variables for buffer update and save states
 local updating_buffer = false
 local saving_buffer = false
@@ -1503,14 +1509,12 @@ function redraw()
     else
       redraw_screen_1()
     end
-  elseif screen_mode == 2 then
-    redraw_screen_2()
-  elseif screen_mode == 3 then
-    redraw_screen_3()
-  elseif screen_mode == 4 then
-    redraw_screen_4()
-  elseif screen_mode == 5 then
-    redraw_screen_5()
+  else
+    local titles = { "FB", "ST", "DL", "RE" }
+    local param_groups = { filterbank_params, saturation_params, delay_params, reverb_params }
+    local strip_lengths = { 12, nil, 7, 8 }
+    local index = screen_mode - 1
+    draw_param_list(titles[index], param_groups[index], selected_param[screen_mode], strip_lengths[index])
   end
 
   screen.update()
@@ -1663,72 +1667,6 @@ function redraw_screen_1B()
     screen.move(90, 40)
     screen.level(15)
     screen.text("Saving...")
-  end
-end
-
-function redraw_screen_2()
-  screen.move(0, 20)
-  screen.level(15)
-  screen.font_size(24)
-  screen.text("FB")
-  screen.font_size(8)
-
-  for i, param in ipairs(filterbank_params) do
-    local y = 0 + i * 10
-    screen.move(35, y)
-    screen.level(i == selected_param[2] and 15 or 2)
-    -- remove 'filterbank_' from the param name
-    param_name = string.sub(param, 12)
-    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
-  end
-end
-
-function redraw_screen_3()
-  screen.move(0, 20)
-  screen.level(15)
-  screen.font_size(24)
-  screen.text("ST")
-  screen.font_size(8)
-
-  for i, param in ipairs(saturation_params) do
-    local y = 0 + i * 10
-    screen.move(35, y)
-    screen.level(i == selected_param[3] and 15 or 2)
-    screen.text(param .. ": " .. string.format("%.2f", params:get(param)))
-  end
-end
-
-function redraw_screen_4()
-  screen.move(0, 20)
-  screen.level(15)
-  screen.font_size(24)
-  screen.text("DL")
-  screen.font_size(8)
-
-  for i, param in ipairs(delay_params) do
-    local y = 0 + i * 10
-    screen.move(35, y)
-    screen.level(i == selected_param[4] and 15 or 2)
-    -- remove 'delay_' from the param name
-    param_name = string.sub(param, 7)
-    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
-  end
-end
-
-function redraw_screen_5()
-  screen.move(0, 20)
-  screen.level(15)
-  screen.font_size(24)
-  screen.text("RE")
-  screen.font_size(8)
-
-  for i, param in ipairs(reverb_params) do
-    local y = 0 + i * 10
-    screen.move(35, y)
-    screen.level(i == selected_param[5] and 15 or 2)
-    -- remove 'reverb_' from the param name
-    param_name = string.sub(param, 8)
-    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
   end
 end
 
