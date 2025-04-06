@@ -237,7 +237,12 @@ local function record_arc_event(n, d)
   end
 
   local arc_snapshot = { {}, {}, {}, {} }
-  arc_snapshot[selected_arc][n] = current_arc_params[selected_arc][n]
+  if selected_arc == 4 and n == 4 then
+    arc_snapshot[4][2] = params:get(selected_voice .. "loop_start")
+    arc_snapshot[4][3] = params:get(selected_voice .. "loop_end")
+  else
+    arc_snapshot[selected_arc][n] = current_arc_params[selected_arc][n]
+  end
 
   if record_bank > 0 then
     local current_time = util.time()
