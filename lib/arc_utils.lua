@@ -284,6 +284,49 @@ local function display_loop_length_params(arc_device, encoder, loop_start, loop_
     end
 end
 
+-- Display both loop start and end with playhead position
+local function display_loop_segment_params(arc_device, encoder, loop_start, loop_end, playhead, loop_active)
+    local total_leds = 64
+    local start_led = math.floor(loop_start * total_leds) + 1
+    local end_led = math.floor(loop_end * total_leds) + 1
+    local playhead_led = playhead and (math.floor(playhead * total_leds) + 1) or nil
+
+    for led = 1, total_leds do
+        arc_device:led(encoder, led, 0)
+    end
+
+    if loop_active then
+        if start_led <= end_led then
+            for led = start_led, end_led do
+                arc_device:led(encoder, led, 5)
+            end
+        else
+            for led = start_led, total_leds do
+                arc_device:led(encoder, led, 5)
+            end
+            for led = 1, end_led do
+                arc_device:led(encoder, led, 5)
+            end
+        end
+        arc_device:led(encoder, start_led, 15)
+        arc_device:led(encoder, end_led, 15)
+    end
+
+    if playhead_led then
+        local in_loop = false
+        if loop_active then
+            if start_led <= end_led then
+                in_loop = playhead_led >= start_led and playhead_led <= end_led
+            else
+                in_loop = playhead_led >= start_led or playhead_led <= end_led
+            end
+        end
+        arc_device:led(encoder, playhead_led, in_loop and 10 or 2)
+    end
+
+    arc_device:refresh()
+end
+
 -- Export the functions
 return {
     display_percent_markers = display_percent_markers,
@@ -300,4 +343,5 @@ return {
     display_loop_start_params = display_loop_start_params,
     display_loop_end_params = display_loop_end_params,
     display_loop_length_params = display_loop_length_params,
+    display_loop_segment_params = display_loop_segment_params
 }

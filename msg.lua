@@ -1313,6 +1313,29 @@ function arc_enc_update(n, d)
     return
   end
 
+  if selected_arc == 4 and n == 4 then
+    local position = positions[selected_voice]
+    local position_angle = arc_utils.scale_angle(position, 1)
+    arc_device:segment(1, position_angle, position_angle + 0.2, 15)
+
+    local loop_start = params:get(selected_voice .. "loop_start")
+    local loop_end = params:get(selected_voice .. "loop_end")
+    local playhead = positions[selected_voice] or 0
+    local loop_active = params:get(selected_voice .. "loop_on") == 1
+
+    arc_utils.display_loop_start_params(arc_device, 2, loop_start, loop_end, playhead, loop_active)
+    arc_utils.display_loop_end_params(arc_device, 3, loop_start, loop_end, playhead, loop_active)
+
+    local loop_length = loop_end - loop_start
+    local delta_pos = adjusted_delta / 100
+    local new_start = util.clamp(loop_start + delta_pos, 0, 1 - loop_length)
+    local new_end = new_start + loop_length
+    params:set(selected_voice .. "loop_start", new_start)
+    params:set(selected_voice .. "loop_end", new_end)
+    redraw()
+    return
+  end
+
   -- existing granular logic
   if param_name == "semitones" then
     local semitones_precise = params:get(selected_voice .. "semitones_precise")
@@ -1374,6 +1397,7 @@ function update_arc_display()
 
     arc_utils.display_loop_start_params(arc_device, 2, loop_start, loop_end, playhead, loop_active)
     arc_utils.display_loop_end_params(arc_device, 3, loop_start, loop_end, playhead, loop_active)
+    arc_utils.display_loop_segment_params(arc_device, 4, loop_start, loop_end, playhead, loop_active)
   end
 
   arc_device:refresh()
