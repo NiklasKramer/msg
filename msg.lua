@@ -1293,7 +1293,7 @@ function arc_enc_update(n, d)
   if not param_name then return end
   local param_id = selected_voice .. param_name
 
-  if n == 1 then
+  if param_name == "position" then
     local newPosition = positions[selected_voice] + (adjusted_delta / 100)
     newPosition = newPosition % 1
     positions[selected_voice] = newPosition
@@ -1356,6 +1356,7 @@ function update_arc_display()
   elseif selected_arc == 2 then
     -- Display parameters for arc screen mode
     local volume = params:get(selected_voice .. "volume")
+    print(volume)
     local spread = params:get(selected_voice .. "spread")
     local jitter = params:get(selected_voice .. "jitter")
     local filter = params:get(selected_voice .. "filter")
