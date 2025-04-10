@@ -46,10 +46,12 @@ local screen_pages = {
   [3] = {
     title = "Grain",
     params = {
+      { id = "speed",   label = "Speed",   format = "%.0f%%" },
       { id = "size",    label = "Size",    format = "%.1fms" },
       { id = "density", label = "Density", format = "%.1fHz" },
       { id = "spread",  label = "Spread",  format = "%.1f%%" },
-      { id = "jitter",  label = "Jitter",  format = "%.1fms" }
+      { id = "jitter",  label = "Jitter",  format = "%.1fms" },
+
     }
   },
   [4] = {
@@ -81,6 +83,7 @@ local screen_pages = {
     }
   }
 }
+
 local speed_display_values = { 0, 12.5, 25, 50, 100, 200, 400, 800 }
 
 -- Global screen mode variable
@@ -197,11 +200,7 @@ local max_saturation_send = 20
 local min_reverb_send = -60
 local max_reverb_send = 20
 
---state
-local state_led_levels = {}
-for i = 1, STATES do
-  state_led_levels[i] = 0
-end
+
 
 local LFO_TARGETS = {
   SIZE = 1,
@@ -1525,6 +1524,9 @@ local function draw_param_list(title, param_list, selected_index, prefix_strip)
         end
       end
     end
+    if tonumber(display_value) ~= nil then
+      display_value = string.format("%.6f", tonumber(display_value))
+    end
     screen.text(param_name .. ": " .. display_value)
   end
 end
@@ -1709,10 +1711,18 @@ function redraw_screen_1()
       screen.level(i == selected_param[1] and 15 or 2)
       local param_id = selected_voice .. param.id
       local value = params:get(param_id)
-      if param.format then
+      if param.id:match("_lfo%d+_target") then
+        for _, opt in ipairs(LFO_TARGET_OPTIONS) do
+          if opt[2] == value then
+            value = opt[1]
+            break
+          end
+        end
+        screen.text(param.label .. ": " .. value)
+      elseif param.format then
         screen.text(param.label .. ": " .. string.format(param.format, value))
       else
-        screen.text(param.label .. ": " .. value)
+        screen.text(param.label .. ": " .. string.format("%.1f", value))
       end
     end
   end
