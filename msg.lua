@@ -55,13 +55,8 @@ local screen_pages = {
   [4] = {
     title = "Audio",
     params = {
-      { id = "clicky",     label = "Clicky" },
-      { id = "record",     label = "Record" },
-      { id = "mute",       label = "Mute" },
-      { id = "granular",   label = "Grain Mode" },
-      { id = "loop_on",    label = "Loop On" },
-      { id = "loop_start", label = "Loop Start" },
-      { id = "loop_end",   label = "Loop End" }
+      { id = "clicky", label = "Clicky" },
+      { id = "glide",  label = "Glide" }
     }
   },
   [5] = {
@@ -76,18 +71,13 @@ local screen_pages = {
     }
   },
   [6] = {
-    title = "LFOs",
+    title = "LFO 1",
     params = {
       { id = "_lfo1_target", label = "LFO1 Target" },
       { id = "_lfo1_rate",   label = "LFO1 Rate" },
       { id = "_lfo1_depth",  label = "LFO1 Depth" },
       { id = "_lfo1_enable", label = "LFO1 Enable" },
       { id = "_lfo1_offset", label = "LFO1 Offset" },
-      { id = "_lfo2_target", label = "LFO2 Target" },
-      { id = "_lfo2_rate",   label = "LFO2 Rate" },
-      { id = "_lfo2_depth",  label = "LFO2 Depth" },
-      { id = "_lfo2_enable", label = "LFO2 Enable" },
-      { id = "_lfo2_offset", label = "LFO2 Offset" }
     }
   }
 }
@@ -187,7 +177,7 @@ local max_delay = 20
 local min_spread = 0
 local max_spread = 100
 local min_jitter = 0
-local max_jitter = 500
+local max_jitter = 5000
 local min_filter = 0
 local max_filter = 1
 local min_pan = -1
@@ -223,18 +213,46 @@ local LFO_TARGETS = {
   SPREAD = 7,
   JITTER = 8,
   PAN = 9,
+  BIT_DEPTH = 10,
+  SAMPLE_RATE = 11,
+  REDUCTION_MIX = 12,
+  TREMOLO_DEPTH = 13,
+  TREMOLO_RATE = 14,
+  WOBBLE = 15,
+  FILTERBANK = 16,
+  SATURATION = 17,
+  DELAY = 18,
+  REVERB = 19,
+  LOOP_START = 20,
+  LOOP_END = 21,
+  GLIDE = 22,
+  FINETUNE = 23
 }
 
 local LFO_TARGET_OPTIONS = {
-  { "Size",     LFO_TARGETS.SIZE },
-  { "Density",  LFO_TARGETS.DENSITY },
-  { "Position", LFO_TARGETS.POSITION },
-  { "Speed",    LFO_TARGETS.SPEED },
-  { "Filter",   LFO_TARGETS.FILTER },
-  { "Volume",   LFO_TARGETS.VOLUME },
-  { "Spread",   LFO_TARGETS.SPREAD },
-  { "Jitter",   LFO_TARGETS.JITTER },
-  { "Pan",      LFO_TARGETS.PAN }
+  { "Size",          LFO_TARGETS.SIZE },
+  { "Density",       LFO_TARGETS.DENSITY },
+  { "Position",      LFO_TARGETS.POSITION },
+  { "Speed",         LFO_TARGETS.SPEED },
+  { "Filter",        LFO_TARGETS.FILTER },
+  { "Volume",        LFO_TARGETS.VOLUME },
+  { "Spread",        LFO_TARGETS.SPREAD },
+  { "Jitter",        LFO_TARGETS.JITTER },
+  { "Pan",           LFO_TARGETS.PAN },
+  { "Bit Depth",     LFO_TARGETS.BIT_DEPTH },
+  { "Sample Rate",   LFO_TARGETS.SAMPLE_RATE },
+  { "Reduction Mix", LFO_TARGETS.REDUCTION_MIX },
+  { "Trem Depth",    LFO_TARGETS.TREMOLO_DEPTH },
+  { "Trem Rate",     LFO_TARGETS.TREMOLO_RATE },
+  { "Wobble",        LFO_TARGETS.WOBBLE },
+  { "Filterbank",    LFO_TARGETS.FILTERBANK },
+  { "Saturation",    LFO_TARGETS.SATURATION },
+  { "Delay",         LFO_TARGETS.DELAY },
+  { "Reverb",        LFO_TARGETS.REVERB },
+  { "Loop Start",    LFO_TARGETS.LOOP_START },
+  { "Loop End",      LFO_TARGETS.LOOP_END },
+  { "Glide",         LFO_TARGETS.GLIDE },
+  { "Finetune",      LFO_TARGETS.FINETUNE }
 }
 
 function init_grid_rows()
@@ -249,7 +267,7 @@ function init_grid_rows()
     control_row = 15
     semitone_row = 16
     state_row = 14
-    VOICES = 8
+    VOICES = 6
     number_of_rows = 16
   end
 end
@@ -730,7 +748,7 @@ function topbar_key(x, y, z)
       -- record handler
       local recorder = (x - 6) + 9 * (y - 1) + 1
       record_handler(recorder)
-    elseif x <= (VOICES <= 4 and 4 or 8) then
+    elseif x <= math.min(8, VOICES) then
       -- stop, only if alt is not pressed
       if alt then
         local voice = x + 4 * (y - 1)
@@ -738,11 +756,9 @@ function topbar_key(x, y, z)
         local hold = params:get(voice .. "hold")
         params:set(voice .. "hold", hold == 0 and 1 or 0)
       else
-        -- adjust voice selection depending on the number of voices
-        if VOICES <= 4 then
-          selected_voice = x
-        else
-          selected_voice = x + 4 * (y - 1)
+        local calculated_voice = x + 4 * (y - 1)
+        if calculated_voice <= VOICES then
+          selected_voice = calculated_voice
         end
       end
     end
@@ -1084,10 +1100,10 @@ function init_global_and_hidden_params()
   params:add_separator("")
   params:add_separator('header', 'ARC + General')
 
-  params:add_control("arc_sens_1", "Arc Sensitivity 1", controlspec.new(0.01, 2, 'lin', 0.01, 0.05))
-  params:add_control("arc_sens_2", "Arc Sensitivity 2", controlspec.new(0.01, 2, 'lin', 0.01, 0.05))
-  params:add_control("arc_sens_3", "Arc Sensitivity 3", controlspec.new(0.01, 2, 'lin', 0.01, 0.05))
-  params:add_control("arc_sens_4", "Arc Sensitivity 4", controlspec.new(0.01, 2, 'lin', 0.01, 0.05))
+  params:add_control("arc_sens_1", "Arc Sensitivity 1", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
+  params:add_control("arc_sens_2", "Arc Sensitivity 2", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
+  params:add_control("arc_sens_3", "Arc Sensitivity 3", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
+  params:add_control("arc_sens_4", "Arc Sensitivity 4", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
 
   -- Hidden params
   for v = 1, VOICES do
@@ -1499,7 +1515,17 @@ local function draw_param_list(title, param_list, selected_index, prefix_strip)
     screen.move(35, y)
     screen.level(i == selected_index and 15 or 2)
     local param_name = prefix_strip and string.sub(param, prefix_strip) or param
-    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
+    local val = params:get(param)
+    local display_value = val
+    if param_name:match("_lfo%d+_target") then
+      for _, opt in ipairs(LFO_TARGET_OPTIONS) do
+        if opt[2] == val then
+          display_value = opt[1]
+          break
+        end
+      end
+    end
+    screen.text(param_name .. ": " .. display_value)
   end
 end
 
@@ -1690,13 +1716,6 @@ function redraw_screen_1()
       end
     end
   end
-
-  -- Draw screen submode indicator (e.g., "1A", "1B", etc.)
-  local mode_labels = { "A", "B", "C", "D", "E", "F" }
-  local submode_label = mode_labels[screen_submode] or "?"
-  screen.level(8)
-  screen.move(115, 60)
-  screen.text("1" .. submode_label)
 end
 
 -- Setup LFOs for each voice
@@ -1750,6 +1769,30 @@ function update_lfo_ranges()
       elseif target == LFO_TARGETS.PAN then
         lfos[v][lfo_num]:set('min', min_pan)
         lfos[v][lfo_num]:set('max', max_pan)
+      elseif target == LFO_TARGETS.BIT_DEPTH then
+        lfos[v][lfo_num]:set('min', 1)
+        lfos[v][lfo_num]:set('max', 24)
+      elseif target == LFO_TARGETS.SAMPLE_RATE then
+        lfos[v][lfo_num]:set('min', 1)
+        lfos[v][lfo_num]:set('max', 48000)
+      elseif target == LFO_TARGETS.REDUCTION_MIX or target == LFO_TARGETS.TREMOLO_DEPTH or target == LFO_TARGETS.WOBBLE then
+        lfos[v][lfo_num]:set('min', 0)
+        lfos[v][lfo_num]:set('max', 1)
+      elseif target == LFO_TARGETS.TREMOLO_RATE then
+        lfos[v][lfo_num]:set('min', 0)
+        lfos[v][lfo_num]:set('max', 20)
+      elseif target == LFO_TARGETS.FILTERBANK or target == LFO_TARGETS.SATURATION or target == LFO_TARGETS.DELAY or target == LFO_TARGETS.REVERB then
+        lfos[v][lfo_num]:set('min', -60)
+        lfos[v][lfo_num]:set('max', 20)
+      elseif target == LFO_TARGETS.LOOP_START or target == LFO_TARGETS.LOOP_END then
+        lfos[v][lfo_num]:set('min', 0)
+        lfos[v][lfo_num]:set('max', 1)
+      elseif target == LFO_TARGETS.GLIDE then
+        lfos[v][lfo_num]:set('min', 0)
+        lfos[v][lfo_num]:set('max', 1)
+      elseif target == LFO_TARGETS.FINETUNE then
+        lfos[v][lfo_num]:set('min', 0)
+        lfos[v][lfo_num]:set('max', 4)
       end
     end
   end
@@ -1777,6 +1820,34 @@ function lfo_action(voice, lfo_num, scaled)
     params:set(voice .. "jitter", scaled)
   elseif target == LFO_TARGETS.PAN then
     params:set(voice .. "pan", scaled)
+  elseif target == LFO_TARGETS.BIT_DEPTH then
+    params:set(voice .. "bit_depth", scaled)
+  elseif target == LFO_TARGETS.SAMPLE_RATE then
+    params:set(voice .. "sample_rate", scaled)
+  elseif target == LFO_TARGETS.REDUCTION_MIX then
+    params:set(voice .. "reduction_mix", scaled)
+  elseif target == LFO_TARGETS.TREMOLO_DEPTH then
+    params:set(voice .. "tremolo_depth", scaled)
+  elseif target == LFO_TARGETS.TREMOLO_RATE then
+    params:set(voice .. "tremolo_rate", scaled)
+  elseif target == LFO_TARGETS.WOBBLE then
+    params:set(voice .. "wobble", scaled)
+  elseif target == LFO_TARGETS.FILTERBANK then
+    params:set(voice .. "filterbank", scaled)
+  elseif target == LFO_TARGETS.SATURATION then
+    params:set(voice .. "saturation", scaled)
+  elseif target == LFO_TARGETS.DELAY then
+    params:set(voice .. "delay", scaled)
+  elseif target == LFO_TARGETS.REVERB then
+    params:set(voice .. "reverb", scaled)
+  elseif target == LFO_TARGETS.LOOP_START then
+    params:set(voice .. "loop_start", scaled)
+  elseif target == LFO_TARGETS.LOOP_END then
+    params:set(voice .. "loop_end", scaled)
+  elseif target == LFO_TARGETS.GLIDE then
+    params:set(voice .. "glide", scaled)
+  elseif target == LFO_TARGETS.FINETUNE then
+    params:set(voice .. "finetune", scaled)
   end
 end
 

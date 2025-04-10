@@ -1,6 +1,6 @@
 
 Engine_MSG : CroneEngine {
-	classvar nvoices = 8;
+	classvar nvoices = 6;
 
 	var pg;
 	var reverb;
@@ -791,6 +791,11 @@ Engine_MSG : CroneEngine {
 		phases.do({ arg bus; bus.free; });
 		levels.do({ arg bus; bus.free; });
 		buffers.do({ arg b; b.do(_.free); });
+
+		if(~tfBuf.notNil) {
+			~tfBuf.free;
+		};
+
 		reverb.free;
 		reverbBus.free;
 		delay.free;
@@ -799,5 +804,11 @@ Engine_MSG : CroneEngine {
 		saturationBus.free;
 		filterbank.free;
 		filterbankBus.free;
+
+		if(pg.notNil) {
+			pg.free;
+		};
+
+		seek_tasks.do(_.stop);
 	}
 }
