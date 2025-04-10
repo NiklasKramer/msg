@@ -15,18 +15,89 @@ local arc_device = arc.connect()
 -- Arc screen mode
 -- local arc_alt_mode = false
 local selected_arc = 1
+
 local arc_params = {
   [1] = { "position", "speed", "size", "density" },
   [2] = { "volume", "spread", "jitter", "filter" },
   [3] = { "filterbank", "saturation", "reverb", "delay" },
   [4] = { "position", "loop_start", "loop_end", "loop_start" }
 }
+
+local screen_pages = {
+  [1] = {
+    title = "Voice A",
+    params = {
+      { id = "volume",     label = "Volume",  format = "%.1f dB" },
+      { id = "pan",        label = "Pan",     format = "%.2f" },
+      { id = "filterbank", label = "FB Send" },
+      { id = "saturation", label = "Sat Send" },
+      { id = "reverb",     label = "Rev Send" },
+      { id = "delay",      label = "Del Send" }
+    }
+  },
+  [2] = {
+    title = "Buffer",
+    params = {
+      { id = "buffer_length",        label = "Length", format = "%.1fs" },
+      { id = "update_buffer_length", label = "Update" },
+      { id = "save_buffer",          label = "Save" }
+    }
+  },
+  [3] = {
+    title = "Grain",
+    params = {
+      { id = "size",    label = "Size",    format = "%.1fms" },
+      { id = "density", label = "Density", format = "%.1fHz" },
+      { id = "spread",  label = "Spread",  format = "%.1f%%" },
+      { id = "jitter",  label = "Jitter",  format = "%.1fms" }
+    }
+  },
+  [4] = {
+    title = "Audio",
+    params = {
+      { id = "clicky",     label = "Clicky" },
+      { id = "record",     label = "Record" },
+      { id = "mute",       label = "Mute" },
+      { id = "granular",   label = "Grain Mode" },
+      { id = "loop_on",    label = "Loop On" },
+      { id = "loop_start", label = "Loop Start" },
+      { id = "loop_end",   label = "Loop End" }
+    }
+  },
+  [5] = {
+    title = "FX",
+    params = {
+      { id = "bit_depth",     label = "Bit Depth" },
+      { id = "sample_rate",   label = "Sample Rate" },
+      { id = "reduction_mix", label = "Mix" },
+      { id = "tremolo_depth", label = "Trem Depth" },
+      { id = "tremolo_rate",  label = "Trem Rate" },
+      { id = "wobble",        label = "Wobble" }
+    }
+  },
+  [6] = {
+    title = "LFOs",
+    params = {
+      { id = "_lfo1_target", label = "LFO1 Target" },
+      { id = "_lfo1_rate",   label = "LFO1 Rate" },
+      { id = "_lfo1_depth",  label = "LFO1 Depth" },
+      { id = "_lfo1_enable", label = "LFO1 Enable" },
+      { id = "_lfo1_offset", label = "LFO1 Offset" },
+      { id = "_lfo2_target", label = "LFO2 Target" },
+      { id = "_lfo2_rate",   label = "LFO2 Rate" },
+      { id = "_lfo2_depth",  label = "LFO2 Depth" },
+      { id = "_lfo2_enable", label = "LFO2 Enable" },
+      { id = "_lfo2_offset", label = "LFO2 Offset" }
+    }
+  }
+}
 local speed_display_values = { 0, 12.5, 25, 50, 100, 200, 400, 800 }
 
 -- Global screen mode variable
 local screen_mode = 1
 local total_screens = 5
-local screen_mode_b = false
+screen_submode = 1
+screen_submode_max = #screen_pages
 
 -- Global variable to keep track of selected parameter index for each screen
 local selected_param = { 1, 1, 1, 1, 1 }
@@ -1396,13 +1467,13 @@ end
 
 -- ENCODERS AND KEYS
 
-function get_param_list(screen_mode)
-  if screen_mode == 1 and screen_mode_b then
-    return { selected_voice .. "buffer_length", selected_voice .. "update_buffer_length", selected_voice .. "save_buffer" }
-  elseif screen_mode == 1 then
-    return { selected_voice .. "volume", selected_voice .. "pan", selected_voice .. "filterbank", selected_voice ..
-    "saturation",
-      selected_voice .. "reverb", selected_voice .. "delay" }
+function get_param_list(screen_mode, screen_submode)
+  if screen_mode == 1 and screen_submode and screen_pages[screen_submode] then
+    local param_list = {}
+    for _, param in ipairs(screen_pages[screen_submode].params) do
+      table.insert(param_list, selected_voice .. param.id)
+    end
+    return param_list
   elseif screen_mode == 2 then
     return filterbank_params
   elseif screen_mode == 3 then
@@ -1440,62 +1511,90 @@ local saving_buffer = false
 -- ████ SCREEN RENDER FUNCTIONS ████
 
 function key(n, z)
-  if screen_mode == 1 and screen_mode_b then
+  if n == 1 and z == 1 then
+    screen_mode = screen_mode == 1 and 2 or 1
+    redraw()
+    return
+  end
+
+  if screen_mode == 1 then
     if n == 2 and z == 1 then
-      screen_mode_b = false -- Switch back to screen 1a
+      screen_submode = screen_submode % screen_submode_max + 1
     elseif n == 3 and z == 1 then
       local selected_param_id = selected_param[screen_mode]
-      if selected_param_id == 2 then
-        updating_buffer = true
-        engine.buffer_length(selected_voice, params:get(selected_voice .. "buffer_length"))
-        clock.run(function()
-          clock.sleep(1)
-          updating_buffer = false
-          redraw()
-        end)
-      elseif selected_param_id == 3 then
-        saving_buffer = true
-        local timestamp = os.date("%Y%m%d%H%M%S")
-        local filepath = '/home/we/dust/audio/MSG/' .. timestamp .. 'buffer_' .. selected_voice .. '.wav'
-        print(filepath)
-        engine.save_buffer(selected_voice, filepath)
-        params:set(selected_voice .. "sample", filepath)
-        clock.run(function()
-          clock.sleep(1)
-          saving_buffer = false
-          redraw()
-        end)
+      if screen_submode == 2 then
+        if selected_param_id == 2 then
+          engine.buffer_length(selected_voice, params:get(selected_voice .. "buffer_length"))
+          clock.run(function()
+            clock.sleep(1)
+            redraw()
+          end)
+        elseif selected_param_id == 3 then
+          local timestamp = os.date("%Y%m%d%H%M%S")
+          local filepath = '/home/we/dust/audio/MSG/' .. timestamp .. 'buffer_' .. selected_voice .. '.wav'
+          engine.save_buffer(selected_voice, filepath)
+          params:set(selected_voice .. "sample", filepath)
+          clock.run(function()
+            clock.sleep(1)
+            redraw()
+          end)
+        end
+      else
+        local param_list = get_param_list(screen_mode, screen_submode)
+        params:delta(param_list[selected_param_id], z)
       end
     end
   else
     if n == 2 and z == 1 then
-      screen_mode_b = not screen_mode_b -- Toggle between screen 1a and screen 1b
-    elseif n == 1 and z == 1 then
-      screen_mode = util.clamp(screen_mode + z, 1, total_screens)
+      screen_mode = util.clamp(screen_mode + z, 2, total_screens)
     elseif n == 3 and z == 1 then
-      local param_list = get_param_list(screen_mode)
+      local param_list = get_param_list(screen_mode, screen_submode)
       params:delta(param_list[selected_param[screen_mode]], z)
     end
   end
+
   redraw()
 end
 
 function enc(n, d)
-  if screen_mode == 1 and screen_mode_b then
+  if n == 1 and screen_mode == 1 then
+    if screen_submode > 1 then
+      screen_submode = screen_submode + d
+      if screen_submode > screen_submode_max then
+        screen_submode = 2
+      elseif screen_submode < 2 then
+        screen_submode = screen_submode_max
+      end
+    end
+    redraw()
+    return
+  elseif n == 1 then
+    if screen_mode == 1 then
+      screen_mode = util.clamp(screen_mode + d, 1, total_screens)
+    else
+      screen_mode = util.clamp(screen_mode + d, 2, total_screens)
+    end
+    redraw()
+    return
+  end
+
+  if screen_mode == 1 and screen_submode == 2 then
     if n == 2 then
-      selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1, #get_param_list(screen_mode))
+      selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1,
+        #(screen_pages[screen_submode] and screen_pages[screen_submode].params or {}))
     elseif n == 3 then
-      local param_list = get_param_list(screen_mode)
-      params:delta(param_list[selected_param[screen_mode]], d)
+      local param_list = screen_pages[screen_submode] and screen_pages[screen_submode].params or {}
+      local param_id = selected_voice .. param_list[selected_param[screen_mode]].id
+      params:delta(param_id, d)
     end
   else
-    if n == 1 then
-      screen_mode = util.clamp(screen_mode + d, 1, total_screens)
-    elseif n == 2 then
-      selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1, #get_param_list(screen_mode))
+    if n == 2 then
+      selected_param[screen_mode] = util.clamp(selected_param[screen_mode] + d, 1,
+        #(screen_pages[screen_submode] and screen_pages[screen_submode].params or {}))
     elseif n == 3 then
-      local param_list = get_param_list(screen_mode)
-      params:delta(param_list[selected_param[screen_mode]], d)
+      local param_list = screen_pages[screen_submode] and screen_pages[screen_submode].params or {}
+      local param_id = selected_voice .. param_list[selected_param[screen_mode]].id
+      params:delta(param_id, d)
     end
   end
   redraw()
@@ -1505,11 +1604,7 @@ function redraw()
   screen.clear()
 
   if screen_mode == 1 then
-    if screen_mode_b then
-      redraw_screen_1B()
-    else
-      redraw_screen_1()
-    end
+    redraw_screen_1()
   else
     local titles = { "FB", "ST", "DL", "RE" }
     local param_groups = { filterbank_params, saturation_params, delay_params, reverb_params }
@@ -1580,95 +1675,28 @@ function redraw_screen_1()
     screen.fill()
   end
 
-  local param_list = get_param_list(1)
-  for i, param in ipairs(param_list) do
-    local y = 0 + i * 10
-    screen.move(35, y)
-    screen.level(i == selected_param[1] and 15 or 2)
-    -- filter out the voice number from the param name
-    local param_name = string.sub(param, 2)
-    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
-  end
-end
-
-function redraw_screen_1B()
-  local track_number_x = 0
-  local track_number_y = 20
-  screen.move(track_number_x, track_number_y)
-  screen.level(gates[selected_voice] > 0 and 15 or 2)
-  screen.font_size(24)
-  screen.text(string.format(selected_voice))
-  screen.font_size(8)
-
-  if params:get(selected_voice .. "hold") == 0 then
-    local underline_start_x = track_number_x
-    local underline_end_x = track_number_x + 20
-    local underline_y = track_number_y + 4
-    screen.move(underline_start_x, underline_y)
-    screen.line(underline_end_x, underline_y)
-    screen.close()
-    screen.stroke()
-  end
-
-  local hold_state_y = track_number_y + 20
-
-  local mode_y = hold_state_y
-  screen.level(15)
-  if params:get(selected_voice .. "granular") == 0 then
-    for i = 1, 10 do
-      local x = track_number_x + math.random(0, 10)
-      local y = mode_y + math.random(-10, 10)
-      screen.pixel(x, y)
+  local current_page = screen_pages[screen_submode]
+  if current_page then
+    for i, param in ipairs(current_page.params) do
+      local y = 0 + i * 10
+      screen.move(35, y)
+      screen.level(i == selected_param[1] and 15 or 2)
+      local param_id = selected_voice .. param.id
+      local value = params:get(param_id)
+      if param.format then
+        screen.text(param.label .. ": " .. string.format(param.format, value))
+      else
+        screen.text(param.label .. ": " .. value)
+      end
     end
-    screen.fill()
   end
 
-  local mute_state_y = mode_y + 18
-  local mute_state_x = track_number_x + 1
-  local mute_box_size = 10
-  screen.move(mute_state_x, mute_state_y)
-  screen.level(2)
-  screen.rect(mute_state_x, mute_state_y, mute_box_size, mute_box_size / 2)
-  screen.stroke()
-  if params:get(selected_voice .. "mute") == 1 then
-    screen.level(12)
-    screen.rect(mute_state_x, mute_state_y, mute_box_size - 1, mute_box_size / 2 - 1)
-    screen.fill()
-  end
-
-  local record_state_x = mute_state_x + mute_box_size + 10
-  local record_state_y = mute_state_y + 2
-  local record_circle_radius = 3
-  screen.move(record_state_x, record_state_y)
-  if params:get(selected_voice .. "record") == 1 then
-    screen.level(15)
-    screen.circle(record_state_x, record_state_y, record_circle_radius)
-    screen.fill()
-  else
-    screen.level(2)
-    screen.circle(record_state_x, record_state_y, record_circle_radius)
-    screen.fill()
-  end
-
-  local param_list = get_param_list(1)
-  for i, param in ipairs(param_list) do
-    local y = 0 + i * 10
-    screen.move(35, y)
-    screen.level(i == selected_param[1] and 15 or 2)
-    local param_name = string.sub(param, 2)
-    screen.text(param_name .. ": " .. string.format("%.2f", params:get(param)))
-  end
-
-  -- Add indicators for buffer updates and saves
-  if updating_buffer then
-    screen.move(90, 40)
-    screen.level(15)
-    screen.text("Updating...")
-  elseif saving_buffer then
-    screen.move(90, 40)
-    screen.level(15)
-    screen.text("Saving...")
-  end
+  -- Draw screen submode indicator (e.g., "1A", "1B", etc.)
+  local mode_labels = { "A", "B", "C", "D", "E", "F" }
+  local submode_label = mode_labels[screen_submode] or "?"
+  screen.level(8)
+  screen.move(115, 60)
+  screen.text("1" .. submode_label)
 end
 
 -- Setup LFOs for each voice
