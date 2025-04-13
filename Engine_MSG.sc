@@ -128,9 +128,10 @@ Engine_MSG : CroneEngine {
 				gain=1, envscale=1, attack=1, sustain=1, release=1, record=0,
 				freeze=0, t_reset_pos=0, filterControl=0.5, useBufRd=1, mute=1, fadeTime=0.1,
 				clicky=0, speed_lag_time=0.1, tremolo_rate=0, tremolo_depth=0, bitDepth=24, sampleRate=48000, reductionMix=0,
-				start=0, end=1;
+				start=0, end=1, loop_fade=1024;
 
-			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch, selected_buf_pos;
+			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch, selected_buf_pos,
+			    fadeSamples, fadeIn_a, fadeOut_a, fadeEnv_a, fadeIn_b, fadeOut_b, fadeEnv_b;
 			var aOrB, crossfade, reset_pos_a, reset_pos_b, updated_semitones, semitones_in_hz, clicky_sig, gran_sig;
 			var wobble_lfo_freq, wobble_lfo_depth, wobble_lfo, wobble_rate;
 			var t_buf_pos_a, t_buf_pos_b, buf_rd_left_a, buf_rd_right_a, buf_rd_left_b, buf_rd_right_b;
@@ -186,6 +187,15 @@ Engine_MSG : CroneEngine {
 				end: end * BufFrames.kr(bufnum: buf1),
 				resetPos: reset_pos_b
 			);
+			// Fade envelope to prevent clicks at loop boundaries
+			fadeSamples = loop_fade;
+			fadeIn_a = LinLin.ar(t_buf_pos_a, start * BufFrames.kr(buf1), (start * BufFrames.kr(buf1)) + fadeSamples, 0, 1).clip(0, 1);
+			fadeOut_a = LinLin.ar(t_buf_pos_a, (end * BufFrames.kr(buf1)) - fadeSamples, end * BufFrames.kr(buf1), 1, 0).clip(0, 1);
+			fadeEnv_a = fadeIn_a * fadeOut_a;
+			
+			fadeIn_b = LinLin.ar(t_buf_pos_b, start * BufFrames.kr(buf1), (start * BufFrames.kr(buf1)) + fadeSamples, 0, 1).clip(0, 1);
+			fadeOut_b = LinLin.ar(t_buf_pos_b, (end * BufFrames.kr(buf1)) - fadeSamples, end * BufFrames.kr(buf1), 1, 0).clip(0, 1);
+			fadeEnv_b = fadeIn_b * fadeOut_b;
 
 			pitch = finetune * semitones_in_hz;
 
@@ -206,11 +216,11 @@ Engine_MSG : CroneEngine {
 				    gran_sig,
 
 				{
-					buf_rd_left_a = BufRd.ar(1, buf1, t_buf_pos_a, loop: 1) ;
-					buf_rd_right_a = BufRd.ar(1, buf2, t_buf_pos_a, loop: 1) ;
-
-					buf_rd_left_b = BufRd.ar(1, buf1, t_buf_pos_b, loop: 1) ;
-					buf_rd_right_b = BufRd.ar(1, buf2, t_buf_pos_b, loop: 1) ;
+					buf_rd_left_a = BufRd.ar(1, buf1, t_buf_pos_a, loop: 1) * fadeEnv_a;
+					buf_rd_right_a = BufRd.ar(1, buf2, t_buf_pos_a, loop: 1) * fadeEnv_a;
+					
+					buf_rd_left_b = BufRd.ar(1, buf1, t_buf_pos_b, loop: 1) * fadeEnv_b;
+					buf_rd_right_b = BufRd.ar(1, buf2, t_buf_pos_b, loop: 1) * fadeEnv_b;
 
 					
 					[
@@ -274,75 +284,75 @@ Engine_MSG : CroneEngine {
 
 		///////////////////////////////////////////
 
-		SynthDef(\saturator, { |in=0, out=0, srate=48000, sdepth=32, crossover=1400, distAmount=15, lowbias=0.04, highbias=0.12, hissAmount=0.0, cutoff=11500, outVolume=1|
-			var input = In.ar(in, 2);  // Read 2 channels from the input
-			var crossAmount = 50;
+		// SynthDef(\saturator, { |in=0, out=0, srate=48000, sdepth=32, crossover=1400, distAmount=15, lowbias=0.04, highbias=0.12, hissAmount=0.0, cutoff=11500, outVolume=1|
+		// 	var input = In.ar(in, 2);  // Read 2 channels from the input
+		// 	var crossAmount = 50;
 
-			// Process each channel independently
-			var processChannel = { |channel|
-				var decimated = Decimator.ar(channel, srate, sdepth);
+		// 	// Process each channel independently
+		// 	var processChannel = { |channel|
+		// 		var decimated = Decimator.ar(channel, srate, sdepth);
 				
-				var lpf = LPF.ar(
-					decimated, 
-					crossover + crossAmount, 
-					1 
-				) * lowbias;
+		// 		var lpf = LPF.ar(
+		// 			decimated, 
+		// 			crossover + crossAmount, 
+		// 			1 
+		// 		) * lowbias;
 
-				var hpf = HPF.ar(
-					decimated,
-					crossover - crossAmount,
-					1
-				) * highbias;
+		// 		var hpf = HPF.ar(
+		// 			decimated,
+		// 			crossover - crossAmount,
+		// 			1
+		// 		) * highbias;
 
-				var beforeHiss = Mix.new([
-					Mix.new([lpf, hpf]),
-					HPF.ar(Mix.new([PinkNoise.ar(0.001), Dust.ar(5, 0.002)]), 2000, hissAmount)
-				]);
+		// 		var beforeHiss = Mix.new([
+		// 			Mix.new([lpf, hpf]),
+		// 			HPF.ar(Mix.new([PinkNoise.ar(0.001), Dust.ar(5, 0.002)]), 2000, hissAmount)
+		// 		]);
 
-				var compressed = Compander.ar(beforeHiss, decimated,
-					thresh: 0.2,
-					slopeBelow: 1,
-					slopeAbove: 0.3,
-					clampTime: 0.001,
-					relaxTime: 0.1
-				);
-				var shaped = Shaper.ar(~tfBuf, compressed * distAmount);
+		// 		var compressed = Compander.ar(beforeHiss, decimated,
+		// 			thresh: 0.2,
+		// 			slopeBelow: 1,
+		// 			slopeAbove: 0.3,
+		// 			clampTime: 0.001,
+		// 			relaxTime: 0.1
+		// 		);
+		// 		var shaped = Shaper.ar(~tfBuf, compressed * distAmount);
 
-				var afterHiss = HPF.ar(Mix.new([PinkNoise.ar(1), Dust.ar(5, 1)]), 2000, 1);
+		// 		var afterHiss = HPF.ar(Mix.new([PinkNoise.ar(1), Dust.ar(5, 1)]), 2000, 1);
 
-				var duckedHiss = Compander.ar(afterHiss, decimated,
-					thresh: 0.4,
-					slopeBelow: 1,
-					slopeAbove: 0.2,
-					clampTime: 0.01,
-					relaxTime: 0.1
-				) * 0.5 * hissAmount;
+		// 		var duckedHiss = Compander.ar(afterHiss, decimated,
+		// 			thresh: 0.4,
+		// 			slopeBelow: 1,
+		// 			slopeAbove: 0.2,
+		// 			clampTime: 0.01,
+		// 			relaxTime: 0.1
+		// 		) * 0.5 * hissAmount;
 
-				var morehiss = Mix.new([
-					duckedHiss, 
-					Mix.new([lpf * (1 / lowbias) * (distAmount / 10), shaped])
-				]);
+		// 		var morehiss = Mix.new([
+		// 			duckedHiss, 
+		// 			Mix.new([lpf * (1 / lowbias) * (distAmount / 10), shaped])
+		// 		]);
 
-				var limited = Limiter.ar(Mix.new([
-					decimated * 0.5,
-					morehiss
-				]), 0.9, 0.01);
+		// 		var limited = Limiter.ar(Mix.new([
+		// 			decimated * 0.5,
+		// 			morehiss
+		// 		]), 0.9, 0.01);
 
-				MoogFF.ar(
-					limited,
-					cutoff,
-					1
-				)
-			};
+		// 		MoogFF.ar(
+		// 			limited,
+		// 			cutoff,
+		// 			1
+		// 		)
+		// 	};
 
-			// Apply processing to both channels
-			var processed = input.collect(processChannel);
+		// 	// Apply processing to both channels
+		// 	var processed = input.collect(processChannel);
 
-			// set the output volume
-			processed = processed * outVolume;
-			// Output the processed signal
-			Out.ar(out, processed * outVolume);
-		}).add;
+		// 	// set the output volume
+		// 	processed = processed * outVolume;
+		// 	// Output the processed signal
+		// 	Out.ar(out, processed * outVolume);
+		// }).add;
 
 		// Delay SynthDef
 		SynthDef(\td_22, {|out=0, in=32, delay=0.2, time=10, hpf=330, lpf=8200, w_rate=0.667, w_depth=0.00027, rotate=0.0, mix=0.2, i_max_del=8|
@@ -392,49 +402,49 @@ Engine_MSG : CroneEngine {
 			reverb_out = 0, reverb_level=0, delay_out = 0, delay_level =0, saturation_out = 0, saturation_level = 0;
 			var freqs, source, drySignal, bands, modulations, ampMod, panMod, qMod, adjustedVolume, wetSignal, out_signal;
 
-			// Define the center frequencies of each band
-			freqs = [50, 125, 185, 270, 385, 540, 765, 1100, 1550, 2150, 3000, 4250, 6000, 8500, 12000, 17000];
+			// // Define the center frequencies of each band
+			// freqs = [50, 125, 185, 270, 385, 540, 765, 1100, 1550, 2150, 3000, 4250, 6000, 8500, 12000, 17000];
 
-			// Input source from the bus (stereo)
-			source = In.ar(in, 2);
+			// // Input source from the bus (stereo)
+			// source = In.ar(in, 2);
 			
-			// Dry signal (unprocessed)
-			drySignal = source;
+			// // Dry signal (unprocessed)
+			// drySignal = source;
 			
-			// Generate smooth random modulations for each band's volume
-			modulations = freqs.collect { LFNoise1.kr(modRate).range(1 - depth / 2, 1 + depth / 2).lag(10) };
+			// // Generate smooth random modulations for each band's volume
+			// modulations = freqs.collect { LFNoise1.kr(modRate).range(1 - depth / 2, 1 + depth / 2).lag(10) };
 
-			// Generate amplitude modulations for each band
-			ampMod = freqs.collect { LFNoise1.kr(modRate * 0.7).range(0.1, 2).lag(5) };
+			// // Generate amplitude modulations for each band
+			// ampMod = freqs.collect { LFNoise1.kr(modRate * 0.7).range(0.1, 2).lag(5) };
 
-			// Generate panning modulations for each band
-			panMod = freqs.collect { LFNoise1.kr(panModRate).range(spread * panModDepth * -1, spread * panModDepth).lag(0.1) };
+			// // Generate panning modulations for each band
+			// panMod = freqs.collect { LFNoise1.kr(panModRate).range(spread * panModDepth * -1, spread * panModDepth).lag(0.1) };
 
-			// Generate q modulations
-			qMod = LFNoise1.kr(qModRate).range(1 - qModDepth / 2, 1 + qModDepth / 2) * q;
+			// // Generate q modulations
+			// qMod = LFNoise1.kr(qModRate).range(1 - qModDepth / 2, 1 + qModDepth / 2) * q;
 
-			// Adjust volume based on q
-			adjustedVolume = q.reciprocal * 0.5; // Example adjustment factor, you can tweak this
+			// // Adjust volume based on q
+			// adjustedVolume = q.reciprocal * 0.5; // Example adjustment factor, you can tweak this
 
-			// Apply a bandpass filter to each band for the left and right channels
-			bands = source.collect { |chan|
-				freqs.collect { |freq, i|
-					var modAmp, panPos;
-					modAmp = ampMod[i];
-					panPos = panMod[i];
-					Pan2.ar(BPF.ar(chan, freq, qMod) * modulations[i] * modAmp, panPos)
-				}.sum
-			};
+			// // Apply a bandpass filter to each band for the left and right channels
+			// bands = source.collect { |chan|
+			// 	freqs.collect { |freq, i|
+			// 		var modAmp, panPos;
+			// 		modAmp = ampMod[i];
+			// 		panPos = panMod[i];
+			// 		Pan2.ar(BPF.ar(chan, freq, qMod) * modulations[i] * modAmp, panPos)
+			// 	}.sum
+			// };
 
-			// Apply amplitude envelope
-			wetSignal = bands * EnvGen.kr(Env.adsr, gate, doneAction: 2) * amp * adjustedVolume;
-			out_signal = XFade2.ar(drySignal, wetSignal, wet * 2 - 1);
+			// // Apply amplitude envelope
+			// wetSignal = bands * EnvGen.kr(Env.adsr, gate, doneAction: 2) * amp * adjustedVolume;
+			// out_signal = XFade2.ar(drySignal, wetSignal, wet * 2 - 1);
 
-			// Mix dry and wet signals
-			Out.ar(out, out_signal);
-			Out.ar(reverb_out, out_signal * reverb_level);
-			Out.ar(delay_out, out_signal * delay_level);
-			Out.ar(saturation_out, out_signal * saturation_level);
+			// // Mix dry and wet signals
+			// Out.ar(out, out_signal);
+			// Out.ar(reverb_out, out_signal * reverb_level);
+			// Out.ar(delay_out, out_signal * delay_level);
+			// Out.ar(saturation_out, out_signal * saturation_level);
 
 		}).add;
 
@@ -586,6 +596,11 @@ Engine_MSG : CroneEngine {
 		this.addCommand("loop_end", "if", { arg msg;
 			var voice = msg[1] - 1;
 			voices[voice].set(\end, msg[2]);
+		});
+
+		this.addCommand("loop_fade", "if", { arg msg;
+			var voice = msg[1] - 1;
+			voices[voice].set(\loop_fade, msg[2]);
 		});
 
 		this.addCommand("buffer_length", "if", { arg msg;
