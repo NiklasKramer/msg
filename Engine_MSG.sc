@@ -131,6 +131,7 @@ Engine_MSG : CroneEngine {
 				start=0, end=1, loop_fade=1024;
 
 			var wrapTrig_a, wrapTrig_b, loopFadeEnv_a, loopFadeEnv_b;
+
 			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch, selected_buf_pos,
 			    fadeSamples, fadeIn_a, fadeOut_a, fadeEnv_a, fadeIn_b, fadeOut_b, fadeEnv_b;
 			var aOrB, crossfade, reset_pos_a, reset_pos_b, updated_semitones, semitones_in_hz, clicky_sig, gran_sig;
@@ -162,8 +163,10 @@ Engine_MSG : CroneEngine {
 			semitones = Lag.kr(semitones, speed_lag_time);
 			octaves = Lag.kr(octaves, speed_lag_time);
 
-			reset_pos_a = Latch.kr(pos * BufFrames.kr(buf1), aOrB);
-			reset_pos_b = Latch.kr(pos * BufFrames.kr(buf1), 1 - aOrB);
+			reset_pos_a = Lag.kr(Latch.kr(pos * BufFrames.kr(buf1), aOrB), 0.005);
+			reset_pos_b = Lag.kr(Latch.kr(pos * BufFrames.kr(buf1), 1 - aOrB), 0.005);
+			
+
 			updated_semitones = octaves * 12 + semitones;
 			semitones_in_hz = (2 ** (updated_semitones / 12.0));
 
@@ -596,11 +599,13 @@ Engine_MSG : CroneEngine {
 
 		this.addCommand("loop_start", "if", { arg msg;
 			var voice = msg[1] - 1;
+			voices[voice].set(\t_reset_pos, 1);  // mimic position update behavior
 			voices[voice].set(\start, msg[2]);
 		});
 
 		this.addCommand("loop_end", "if", { arg msg;
 			var voice = msg[1] - 1;
+			voices[voice].set(\t_reset_pos, 1);  // mimic position update behavior
 			voices[voice].set(\end, msg[2]);
 		});
 
