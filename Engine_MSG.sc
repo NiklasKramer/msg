@@ -63,11 +63,14 @@ Engine_MSG : CroneEngine {
 	}
 
 	setBufferLength { arg i, length;
-		if(buffers[i].notNil, {
-			buffers[i].do(_.free);
-			buffers[i] = [Buffer.alloc(context.server, context.server.sampleRate * length)];
-			voices[i].set(\buf1, buffers[i][0], \buf2, buffers[i][0]);
-		});
+	    if(buffers[i].notNil, {
+	        // buffers[i].do(_.free);
+	        buffers[i] = [
+	            Buffer.alloc(context.server, context.server.sampleRate * length), // left
+	            Buffer.alloc(context.server, context.server.sampleRate * length)  // right
+	        ];
+	        voices[i].set(\buf1, buffers[i][0], \buf2, buffers[i][1]);
+	    });
 	}
 
 	saveBuffer { arg i, path;
@@ -88,7 +91,7 @@ Engine_MSG : CroneEngine {
 
 	setBufferForVoice { arg voiceIndex, bufferIndex;
     if (voices[voiceIndex].notNil and: { buffers[bufferIndex].notNil }) {
-        voices[voiceIndex].set(\buf1, buffers[bufferIndex][0], \buf2, buffers[bufferIndex][0]);
+        voices[voiceIndex].set(\buf1, buffers[bufferIndex][0], \buf2, buffers[bufferIndex][1]);
     } {
         "Invalid voice or buffer index".postln;
     }
@@ -107,10 +110,10 @@ Engine_MSG : CroneEngine {
 		~tf = ~tf.normalize;
 		~tfBuf = Buffer.loadCollection(context.server, ~tf.asWavetableNoWrap);
 		buffers = Array.fill(nvoices, { arg i;
-			[Buffer.alloc(
-				context.server,
-				context.server.sampleRate * 10,
-			)];
+			[
+				Buffer.alloc(context.server, context.server.sampleRate * 10), // left
+				Buffer.alloc(context.server, context.server.sampleRate * 10)  // right
+			]
 		});
 
 		SynthDef(\synth, {
@@ -473,7 +476,7 @@ Engine_MSG : CroneEngine {
 				
 
 				\buf1, buffers[i][0],
-				\buf2, buffers[i][0]
+				\buf2, buffers[i][1]
 			], target: pg);
 		});
 
@@ -792,9 +795,7 @@ Engine_MSG : CroneEngine {
 		levels.do({ arg bus; bus.free; });
 		buffers.do({ arg b; b.do(_.free); });
 
-		if(~tfBuf.notNil) {
-			~tfBuf.free;
-		};
+		Buffer.freeAll;
 
 		reverb.free;
 		reverbBus.free;
@@ -805,9 +806,8 @@ Engine_MSG : CroneEngine {
 		filterbank.free;
 		filterbankBus.free;
 
-		if(pg.notNil) {
-			pg.free;
-		};
+		pg.free;
+		
 
 		seek_tasks.do(_.stop);
 	}
