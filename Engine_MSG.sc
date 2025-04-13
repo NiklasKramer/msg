@@ -130,6 +130,7 @@ Engine_MSG : CroneEngine {
 				clicky=0, speed_lag_time=0.1, tremolo_rate=0, tremolo_depth=0, bitDepth=24, sampleRate=48000, reductionMix=0,
 				start=0, end=1, loop_fade=1024;
 
+			var wrapTrig_a, wrapTrig_b, loopFadeEnv_a, loopFadeEnv_b;
 			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch, selected_buf_pos,
 			    fadeSamples, fadeIn_a, fadeOut_a, fadeEnv_a, fadeIn_b, fadeOut_b, fadeEnv_b;
 			var aOrB, crossfade, reset_pos_a, reset_pos_b, updated_semitones, semitones_in_hz, clicky_sig, gran_sig;
@@ -187,6 +188,11 @@ Engine_MSG : CroneEngine {
 				end: end * BufFrames.kr(bufnum: buf1),
 				resetPos: reset_pos_b
 			);
+			wrapTrig_a = Select.kr((t_buf_pos_a > ((end * BufFrames.kr(buf1)) - 1)).asInteger, [0, 1]);
+			loopFadeEnv_a = EnvGen.ar(Env([1, 0, 1], [0.001, 0.001]), wrapTrig_a);
+			
+			wrapTrig_b = Select.kr((t_buf_pos_b > ((end * BufFrames.kr(buf1)) - 1)).asInteger, [0, 1]);
+			loopFadeEnv_b = EnvGen.ar(Env([1, 0, 1], [0.001, 0.001]), wrapTrig_b);
 			// Fade envelope to prevent clicks at loop boundaries
 			fadeSamples = loop_fade;
 			fadeIn_a = LinLin.ar(t_buf_pos_a, start * BufFrames.kr(buf1), (start * BufFrames.kr(buf1)) + fadeSamples, 0, 1).clip(0, 1);
@@ -216,11 +222,11 @@ Engine_MSG : CroneEngine {
 				    gran_sig,
 
 				{
-					buf_rd_left_a = BufRd.ar(1, buf1, t_buf_pos_a, loop: 1) * fadeEnv_a;
-					buf_rd_right_a = BufRd.ar(1, buf2, t_buf_pos_a, loop: 1) * fadeEnv_a;
+					buf_rd_left_a = BufRd.ar(1, buf1, t_buf_pos_a, loop: 1) * fadeEnv_a * loopFadeEnv_a;
+					buf_rd_right_a = BufRd.ar(1, buf2, t_buf_pos_a, loop: 1) * fadeEnv_a * loopFadeEnv_a;
 					
-					buf_rd_left_b = BufRd.ar(1, buf1, t_buf_pos_b, loop: 1) * fadeEnv_b;
-					buf_rd_right_b = BufRd.ar(1, buf2, t_buf_pos_b, loop: 1) * fadeEnv_b;
+					buf_rd_left_b = BufRd.ar(1, buf1, t_buf_pos_b, loop: 1) * fadeEnv_b * loopFadeEnv_b;
+					buf_rd_right_b = BufRd.ar(1, buf2, t_buf_pos_b, loop: 1) * fadeEnv_b * loopFadeEnv_b;
 
 					
 					[
