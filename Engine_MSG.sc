@@ -130,7 +130,9 @@ Engine_MSG : CroneEngine {
 				clicky=0, speed_lag_time=0.1, tremolo_rate=0, tremolo_depth=0, bitDepth=24, sampleRate=48000, reductionMix=0,
 				start=0, end=1, loop_fade=1024;
 
-			var wrapTrig_a, wrapTrig_b, loopFadeEnv_a, loopFadeEnv_b;
+			var wrapTrig_a, wrapTrig_b, loopFadeEnv_a, loopFadeEnv_b, laggedCrossfade;
+			var resetTrig_a, resetTrig_b, safeResetPos_a, safeResetPos_b;
+			var manualReset_a, manualReset_b, finalReset_a, finalReset_b;
 
 			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch, selected_buf_pos,
 			    fadeSamples, fadeIn_a, fadeOut_a, fadeEnv_a, fadeIn_b, fadeOut_b, fadeEnv_b;
@@ -138,6 +140,11 @@ Engine_MSG : CroneEngine {
 			var wobble_lfo_freq, wobble_lfo_depth, wobble_lfo, wobble_rate;
 			var t_buf_pos_a, t_buf_pos_b, buf_rd_left_a, buf_rd_right_a, buf_rd_left_b, buf_rd_right_b;
 			var env, level, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, filtered, stereo_sig, tremoloLFO, signal, record_pos, reduced;
+
+			// Buffer frames variable for dynamic updates
+			var bufFrames = BufFrames.kr(bufnum: buf1);
+			var startFrames = start * bufFrames;
+			var endFrames = end * bufFrames;
 
 			speed = Lag.kr(speed, speed_lag_time );
 
@@ -158,14 +165,28 @@ Engine_MSG : CroneEngine {
 
 			// Buffer reading control
 			aOrB = ToggleFF.kr(t_reset_pos);
-			crossfade = K2A.ar(aOrB);
+			crossfade = Lag.ar(K2A.ar(aOrB), 0.01);
 
 			semitones = Lag.kr(semitones, speed_lag_time);
 			octaves = Lag.kr(octaves, speed_lag_time);
 
-			reset_pos_a = Lag.kr(Latch.kr(pos * BufFrames.kr(buf1), aOrB), 0.005);
-			reset_pos_b = Lag.kr(Latch.kr(pos * BufFrames.kr(buf1), 1 - aOrB), 0.005);
-			
+			reset_pos_a = Latch.kr(pos * bufFrames, aOrB);
+			reset_pos_b = Latch.kr(pos * bufFrames, 1 - aOrB);
+
+			// Manual reset position from pos argument, only when t_reset_pos is triggered
+			manualReset_a = Latch.kr(pos * bufFrames, aOrB);
+			manualReset_b = Latch.kr(pos * bufFrames, 1 - aOrB);
+
+			// Safety check: if Phasor escapes loop range, trigger reset (detect changes using HPZ1)
+			resetTrig_a = HPZ1.kr((reset_pos_a < startFrames) | (reset_pos_a > endFrames)).abs;
+			resetTrig_b = HPZ1.kr((reset_pos_b < startFrames) | (reset_pos_b > endFrames)).abs;
+
+			safeResetPos_a = Select.kr(reset_pos_a < startFrames, [startFrames, endFrames]);
+			safeResetPos_b = Select.kr(reset_pos_b < startFrames, [startFrames, endFrames]);
+
+			// Final reset position: use manual reset only when t_reset_pos is triggered, otherwise use safe reset
+			finalReset_a = Select.kr(t_reset_pos, [safeResetPos_a, manualReset_a]);
+			finalReset_b = Select.kr(t_reset_pos, [safeResetPos_b, manualReset_b]);
 
 			updated_semitones = octaves * 12 + semitones;
 			semitones_in_hz = (2 ** (updated_semitones / 12.0));
@@ -173,37 +194,37 @@ Engine_MSG : CroneEngine {
 			wobble_lfo_freq = LinLin.kr(wobble, 0, 1, 0.8, 25); 
 			wobble_lfo_depth = LinLin.kr(wobble, 0, 1, 0.0, 0.1);
 			wobble_lfo = SinOsc.kr(wobble_lfo_freq, 0, wobble_lfo_depth, 1);
-			
+
 			wobble_rate = BufRateScale.kr(bufnum: buf1) * speed * semitones_in_hz * wobble_lfo * direction;
 
 			t_buf_pos_a = Phasor.ar(
-				trig: aOrB,
+				trig: (aOrB + resetTrig_a),
 				rate: wobble_rate,
-				start: start * BufFrames.kr(bufnum: buf1),
-				end: end * BufFrames.kr(bufnum: buf1),
-				resetPos: reset_pos_a
+				start: startFrames,
+				end: endFrames,
+				resetPos: finalReset_a
 			);
 
 			t_buf_pos_b = Phasor.ar(
-				trig: 1 - aOrB,
+				trig: (1 - aOrB + resetTrig_b),
 				rate: wobble_rate,
-				start: start * BufFrames.kr(bufnum: buf1),
-				end: end * BufFrames.kr(bufnum: buf1),
-				resetPos: reset_pos_b
+				start: startFrames,
+				end: endFrames,
+				resetPos: finalReset_b
 			);
-			wrapTrig_a = Select.kr((t_buf_pos_a > ((end * BufFrames.kr(buf1)) - 1)).asInteger, [0, 1]);
+			wrapTrig_a = Select.kr((t_buf_pos_a > (endFrames - 1)).asInteger, [0, 1]);
 			loopFadeEnv_a = EnvGen.ar(Env([1, 0, 1], [0.001, 0.001]), wrapTrig_a);
 			
-			wrapTrig_b = Select.kr((t_buf_pos_b > ((end * BufFrames.kr(buf1)) - 1)).asInteger, [0, 1]);
+			wrapTrig_b = Select.kr((t_buf_pos_b > (endFrames - 1)).asInteger, [0, 1]);
 			loopFadeEnv_b = EnvGen.ar(Env([1, 0, 1], [0.001, 0.001]), wrapTrig_b);
 			// Fade envelope to prevent clicks at loop boundaries
 			fadeSamples = loop_fade;
-			fadeIn_a = LinLin.ar(t_buf_pos_a, start * BufFrames.kr(buf1), (start * BufFrames.kr(buf1)) + fadeSamples, 0, 1).clip(0, 1);
-			fadeOut_a = LinLin.ar(t_buf_pos_a, (end * BufFrames.kr(buf1)) - fadeSamples, end * BufFrames.kr(buf1), 1, 0).clip(0, 1);
+			fadeIn_a = LinLin.ar(t_buf_pos_a, startFrames, startFrames + fadeSamples, 0, 1).clip(0, 1);
+			fadeOut_a = LinLin.ar(t_buf_pos_a, endFrames - fadeSamples, endFrames, 1, 0).clip(0, 1);
 			fadeEnv_a = fadeIn_a * fadeOut_a;
 			
-			fadeIn_b = LinLin.ar(t_buf_pos_b, start * BufFrames.kr(buf1), (start * BufFrames.kr(buf1)) + fadeSamples, 0, 1).clip(0, 1);
-			fadeOut_b = LinLin.ar(t_buf_pos_b, (end * BufFrames.kr(buf1)) - fadeSamples, end * BufFrames.kr(buf1), 1, 0).clip(0, 1);
+			fadeIn_b = LinLin.ar(t_buf_pos_b, startFrames, startFrames + fadeSamples, 0, 1).clip(0, 1);
+			fadeOut_b = LinLin.ar(t_buf_pos_b, endFrames - fadeSamples, endFrames, 1, 0).clip(0, 1);
 			fadeEnv_b = fadeIn_b * fadeOut_b;
 
 			pitch = finetune * semitones_in_hz;
@@ -231,10 +252,10 @@ Engine_MSG : CroneEngine {
 					buf_rd_left_b = BufRd.ar(1, buf1, t_buf_pos_b, loop: 1) * fadeEnv_b * loopFadeEnv_b;
 					buf_rd_right_b = BufRd.ar(1, buf2, t_buf_pos_b, loop: 1) * fadeEnv_b * loopFadeEnv_b;
 
-					
+					laggedCrossfade = Lag.ar(crossfade, 0.01);
 					[
-						(crossfade * buf_rd_left_a) + ((1 - crossfade) * buf_rd_left_b),
-						(crossfade * buf_rd_right_a) + ((1 - crossfade) * buf_rd_right_b)
+						(laggedCrossfade * buf_rd_left_a) + ((1 - laggedCrossfade) * buf_rd_left_b),
+						(laggedCrossfade * buf_rd_right_a) + ((1 - laggedCrossfade) * buf_rd_right_b)
 					]
 					
 				}
@@ -599,13 +620,11 @@ Engine_MSG : CroneEngine {
 
 		this.addCommand("loop_start", "if", { arg msg;
 			var voice = msg[1] - 1;
-			voices[voice].set(\t_reset_pos, 1);  // mimic position update behavior
 			voices[voice].set(\start, msg[2]);
 		});
 
 		this.addCommand("loop_end", "if", { arg msg;
 			var voice = msg[1] - 1;
-			voices[voice].set(\t_reset_pos, 1);  // mimic position update behavior
 			voices[voice].set(\end, msg[2]);
 		});
 

@@ -1,18 +1,41 @@
 -- arc_utils.lua
 
+
+
 -- Helper function to normalize parameter values to a scale of 0 to 64
 local function normalize_param_value(value, min, max)
     local range = max - min
     return math.floor(((value - min) / range) * 64)
 end
 
+local function apply_arc_rotation(led_index)
+    local rotation = params:get("arc_rotation")
+    local total_leds = 64
+
+    if rotation == 2 then     -- 90 degrees
+        return (led_index + 16 - 1) % total_leds + 1
+    elseif rotation == 3 then -- 180 degrees
+        return (led_index + 32 - 1) % total_leds + 1
+    elseif rotation == 4 then -- 270 degrees
+        return (led_index + 48 - 1) % total_leds + 1
+    else                      -- 0 degrees
+        return led_index
+    end
+end
+
 -- Helper function to scale a value to an angle
 local function scale_angle(value, scale)
-    local angle = value * 2 * math.pi
-    if math.abs(value - scale) < 0.0001 then -- Allow for a tiny margin of error
-        angle = angle - 0.0001               -- Subtract a tiny value to avoid reaching 2 * pi
+    local total_leds = 64
+    local angle = (value % scale) / scale * 2 * math.pi
+    if math.abs(value - scale) < 0.0001 then
+        angle = angle - 0.0001
     end
-    return angle
+
+    local rotation_index = params:get("arc_rotation") or 1
+    local rotation_degrees = (rotation_index - 1) * 90 + 180
+    local rotation_offset = -math.rad(rotation_degrees)
+
+    return (angle + rotation_offset) % (2 * math.pi)
 end
 
 -- Utility to normalize values
@@ -24,6 +47,8 @@ end
 local function value_to_led(value)
     return math.floor(value * 64) + 1
 end
+
+
 
 -- Utility to clear all LEDs on an arc encoder
 local function clear_arc(arc_device, encoder)
@@ -37,14 +62,14 @@ local function draw_loop_segment(arc_device, encoder, start_led, end_led, bright
     local total_leds = 64
     if start_led <= end_led then
         for led = start_led, end_led do
-            arc_device:led(encoder, led, brightness)
+            arc_device:led(encoder, apply_arc_rotation(led), brightness)
         end
     else
         for led = start_led, total_leds do
-            arc_device:led(encoder, led, brightness)
+            arc_device:led(encoder, apply_arc_rotation(led), brightness)
         end
         for led = 1, end_led do
-            arc_device:led(encoder, led, brightness)
+            arc_device:led(encoder, apply_arc_rotation(led), brightness)
         end
     end
 end
@@ -59,7 +84,7 @@ local function display_percent_markers(arc_device, encoder, ...)
         local brightness = 15
 
         -- Display the marker on the arc
-        arc_device:led(encoder, led_position, brightness)
+        arc_device:led(encoder, apply_arc_rotation(led_position), brightness)
     end
 end
 
@@ -82,7 +107,7 @@ local function display_spread_pattern(arc_device, encoder, value, min, max)
         local brightness = math.min(0 + (distance_from_center * 2), 15)
         brightness = math.max(brightness, 3)
 
-        arc_device:led(encoder, led + 1 - 32, brightness)
+        arc_device:led(encoder, apply_arc_rotation(led + 1 - 32), brightness)
     end
     arc_device:refresh()
 end
@@ -97,9 +122,9 @@ local function display_progress_bar(arc_device, encoder, value, min, max)
         if led <= normalized then
             local distance = math.abs(normalized - led)
             local brightness = math.max(1, brightness_max - (distance * gradient_factor))
-            arc_device:led(encoder, led + 1, brightness)
+            arc_device:led(encoder, apply_arc_rotation(led + 1), brightness)
         else
-            arc_device:led(encoder, led + 1, 0)
+            arc_device:led(encoder, apply_arc_rotation(led + 1), 0)
         end
     end
 end
@@ -112,30 +137,30 @@ local function display_filter_pattern(arc_device, encoder, value, min, max)
     local brightness = 5
 
     for led = 1, total_leds do
-        arc_device:led(encoder, led, 0)
+        arc_device:led(encoder, apply_arc_rotation(led), 0)
     end
 
     if value <= 0.5 then
         local active_leds_each_side = math.floor(normalized * 2 * midpoint_led)
         for i = 0, active_leds_each_side - 1 do
-            arc_device:led(encoder, (midpoint_led - i - 1) % total_leds + 1, brightness) -- Left side
-            arc_device:led(encoder, (midpoint_led + i - 1) % total_leds + 1, brightness) -- Right side
+            arc_device:led(encoder, apply_arc_rotation((midpoint_led - i - 1) % total_leds + 1), brightness) -- Left side
+            arc_device:led(encoder, apply_arc_rotation((midpoint_led + i - 1) % total_leds + 1), brightness) -- Right side
         end
     else
         local inactive_leds_each_side = math.floor((normalized - 0.5) * 2 * midpoint_led)
         for i = 0, midpoint_led - inactive_leds_each_side - 1 do
-            arc_device:led(encoder, (1 + i - 1) % total_leds + 1, brightness)
-            arc_device:led(encoder, (total_leds - i - 1) % total_leds + 1, brightness)
+            arc_device:led(encoder, apply_arc_rotation((1 + i - 1) % total_leds + 1), brightness)
+            arc_device:led(encoder, apply_arc_rotation((total_leds - i - 1) % total_leds + 1), brightness)
         end
     end
 
     if value == max then
-        arc_device:led(encoder, midpoint_led, 15)
+        arc_device:led(encoder, apply_arc_rotation(midpoint_led), 15)
     elseif value == min then
-        arc_device:led(encoder, 1, 15)
+        arc_device:led(encoder, apply_arc_rotation(1), 15)
     else
-        arc_device:led(encoder, 1, 15)
-        arc_device:led(encoder, midpoint_led, 15)
+        arc_device:led(encoder, apply_arc_rotation(1), 15)
+        arc_device:led(encoder, apply_arc_rotation(midpoint_led), 15)
     end
 end
 
@@ -150,7 +175,7 @@ local function display_rotating_pattern(arc_device, encoder, value, min, max)
         local led = (start_led + i - 1) % 64 + 1
         local brightness = max_brightness - math.abs(i) * 3
         brightness = math.max(brightness, 1)
-        arc_device:led(encoder, led, brightness)
+        arc_device:led(encoder, apply_arc_rotation(led), brightness)
     end
 end
 
@@ -161,9 +186,9 @@ local function display_random_pattern(arc_device, encoder, value, min, max)
 
     for led = 1, 64 do
         if math.random() > chance then
-            arc_device:led(encoder, led, math.random(5, 12))
+            arc_device:led(encoder, apply_arc_rotation(led), math.random(5, 12))
         else
-            arc_device:led(encoder, led, 0)
+            arc_device:led(encoder, apply_arc_rotation(led), 0)
         end
     end
 end
@@ -175,11 +200,11 @@ local function display_exponential_pattern(arc_device, encoder, value, min, max)
 
     for led = 1, 64 do
         if led == led_position then
-            arc_device:led(encoder, led, 15)
+            arc_device:led(encoder, apply_arc_rotation(led), 15)
         elseif led < led_position then
-            arc_device:led(encoder, led, 3)
+            arc_device:led(encoder, apply_arc_rotation(led), 3)
         else
-            arc_device:led(encoder, led, 0)
+            arc_device:led(encoder, apply_arc_rotation(led), 0)
         end
     end
 end
@@ -198,14 +223,14 @@ local function display_panning_value(arc_device, encoder, value, min, max)
     -- Light up LEDs based on the value
     if value < 0 then
         for led = center_led, led_position, -1 do
-            arc_device:led(encoder, led, 15)
+            arc_device:led(encoder, apply_arc_rotation(led), 15)
         end
     elseif value > 0 then
         for led = center_led, led_position do
-            arc_device:led(encoder, led, 15)
+            arc_device:led(encoder, apply_arc_rotation(led), 15)
         end
     else
-        arc_device:led(encoder, center_led, 15)
+        arc_device:led(encoder, apply_arc_rotation(center_led), 15)
     end
 end
 
@@ -218,15 +243,14 @@ local function display_loop_params(arc_device, encoder, loop_start, loop_end, pl
 
     if loop_start == 0 and loop_end == 1 then
         clear_arc(arc_device, encoder)
-        arc_device:refresh()
         return
     end
 
     clear_arc(arc_device, encoder)
 
-    draw_loop_segment(arc_device, encoder, start_led, end_led, 5)
+    -- draw_loop_segment(arc_device, encoder, start_led, end_led, 5)
 
-    arc_device:led(encoder, playhead_led, 15)
+    arc_device:led(encoder, apply_arc_rotation(playhead_led), 15)
 end
 
 -- Display only loop start position
@@ -239,11 +263,11 @@ local function display_loop_start_params(arc_device, encoder, loop_start, loop_e
     clear_arc(arc_device, encoder)
 
     if loop_active then
-        -- Draw loop region
-        draw_loop_segment(arc_device, encoder, start_led, end_led, 5)
+        -- -- Draw loop region
+        -- draw_loop_segment(arc_device, encoder, start_led, end_led, 5)
         -- Highlight loop start
-        arc_device:led(encoder, start_led, 15)
-        arc_device:led(encoder, end_led, 10)
+        arc_device:led(encoder, apply_arc_rotation(start_led), 15)
+        arc_device:led(encoder, apply_arc_rotation(end_led), 10)
     end
 
     -- Show playhead
@@ -256,7 +280,7 @@ local function display_loop_start_params(arc_device, encoder, loop_start, loop_e
                 in_loop = playhead_led >= start_led or playhead_led <= end_led
             end
         end
-        arc_device:led(encoder, playhead_led, in_loop and 10 or 2)
+        arc_device:led(encoder, apply_arc_rotation(playhead_led), in_loop and 10 or 2)
     end
 end
 
@@ -270,12 +294,11 @@ local function display_loop_end_params(arc_device, encoder, loop_start, loop_end
     clear_arc(arc_device, encoder)
 
     if loop_active then
-        arc_device:led(encoder, end_led, 15)
-        arc_device:led(encoder, start_led, 10)
+        arc_device:led(encoder, apply_arc_rotation(end_led), 15)
+        arc_device:led(encoder, apply_arc_rotation(start_led), 10)
     end
 
-    arc_device:led(encoder, playhead_led, 2)
-    arc_device:refresh()
+    arc_device:led(encoder, apply_arc_rotation(playhead_led), 2)
 end
 
 -- Display loop length as a bar from start to end
@@ -286,7 +309,7 @@ local function display_loop_length_params(arc_device, encoder, loop_start, loop_
 
     clear_arc(arc_device, encoder)
 
-    draw_loop_segment(arc_device, encoder, start_led, end_led, 12)
+    -- draw_loop_segment(arc_device, encoder, apply_arc_rotation(start_led), apply_arc_rotation(end_led), 12)
 end
 
 -- Display both loop start and end with playhead position
@@ -298,9 +321,9 @@ local function display_loop_segment_params(arc_device, encoder, loop_start, loop
     clear_arc(arc_device, encoder)
 
     if loop_active then
-        draw_loop_segment(arc_device, encoder, start_led, end_led, 5)
-        arc_device:led(encoder, start_led, 15)
-        arc_device:led(encoder, end_led, 15)
+        -- draw_loop_segment(arc_device, encoder, apply_arc_rotation(start_led), apply_arc_rotation(end_led), 5)
+        arc_device:led(encoder, apply_arc_rotation(start_led), 15)
+        arc_device:led(encoder, apply_arc_rotation(end_led), 15)
     end
 
     if playhead_led then
@@ -309,10 +332,8 @@ local function display_loop_segment_params(arc_device, encoder, loop_start, loop
             in_loop = start_led <= end_led and (playhead_led >= start_led and playhead_led <= end_led)
                 or start_led > end_led and (playhead_led >= start_led or playhead_led <= end_led)
         end
-        arc_device:led(encoder, playhead_led, in_loop and 10 or 2)
+        arc_device:led(encoder, apply_arc_rotation(playhead_led), in_loop and 10 or 2)
     end
-
-    arc_device:refresh()
 end
 
 -- Export the functions
@@ -334,6 +355,7 @@ return {
     display_loop_segment_params = display_loop_segment_params,
     normalize = normalize,
     value_to_led = value_to_led,
+    apply_arc_rotation = apply_arc_rotation,
     clear_arc = clear_arc,
     draw_loop_segment = draw_loop_segment
 }

@@ -730,8 +730,6 @@ function grid_key(x, y, z, skip_record)
   elseif x == 16 and y == top_row then
     alt = false
   end
-
-  redraw()
 end
 
 function topbar_key(x, y, z)
@@ -1098,7 +1096,7 @@ end
 function init_global_and_hidden_params()
   params:add_separator("")
   params:add_separator('header', 'ARC + General')
-
+  params:add_option('arc_rotation', "Rotation", { 0, 90, 180, 270 }, 4)
   params:add_control("arc_sens_1", "Arc Sensitivity 1", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
   params:add_control("arc_sens_2", "Arc Sensitivity 2", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
   params:add_control("arc_sens_3", "Arc Sensitivity 3", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
@@ -1389,8 +1387,8 @@ function arc_enc_update(n, d)
 
   if selected_arc == 4 and n == 4 then
     local position = positions[selected_voice]
-    local position_angle = arc_utils.scale_angle(position, 1)
-    arc_device:segment(1, position_angle, position_angle + 0.2, 15)
+    -- local position_angle = arc_utils.scale_angle(position, 1)
+    -- arc_device:segment(1, position_angle, position_angle + 0.2, 15)
 
     local param_start = selected_voice .. "loop_start"
     local param_end = selected_voice .. "loop_end"
@@ -1408,7 +1406,6 @@ function arc_enc_update(n, d)
     local new_end = new_start + loop_length
     params:set(param_start, new_start)
     params:set(param_end, new_end)
-    redraw()
     return
   end
 
@@ -1421,8 +1418,6 @@ function arc_enc_update(n, d)
   else
     params:delta(param_id, adjusted_delta)
   end
-
-  redraw()
 end
 
 function update_arc_display()
@@ -1465,7 +1460,7 @@ function update_arc_display()
   elseif selected_arc == 4 then
     local position = positions[selected_voice]
     local position_angle = arc_utils.scale_angle(position, 1)
-    arc_device:segment(1, position_angle, position_angle + 0.2, 15)
+    -- arc_device:segment(1, position_angle, position_angle + 0.2, 15)
 
     local loop_start = params:get(selected_voice .. "loop_start")
     local loop_end = params:get(selected_voice .. "loop_end")
@@ -1541,7 +1536,6 @@ local saving_buffer = false
 function key(n, z)
   if n == 1 and z == 1 then
     screen_mode = screen_mode == 1 and 2 or 1
-    redraw()
     return
   end
 
@@ -1555,7 +1549,6 @@ function key(n, z)
           engine.buffer_length(selected_voice, params:get(selected_voice .. "buffer_length"))
           clock.run(function()
             clock.sleep(1)
-            redraw()
           end)
         elseif selected_param_id == 3 then
           local timestamp = os.date("%Y%m%d%H%M%S")
@@ -1564,7 +1557,6 @@ function key(n, z)
           params:set(selected_voice .. "sample", filepath)
           clock.run(function()
             clock.sleep(1)
-            redraw()
           end)
         end
       else
@@ -1580,8 +1572,6 @@ function key(n, z)
       params:delta(param_list[selected_param[screen_mode]], z)
     end
   end
-
-  redraw()
 end
 
 function enc(n, d)
@@ -1594,7 +1584,6 @@ function enc(n, d)
         screen_submode = screen_submode_max
       end
     end
-    redraw()
     return
   elseif n == 1 then
     if screen_mode == 1 then
@@ -1602,7 +1591,6 @@ function enc(n, d)
     else
       screen_mode = util.clamp(screen_mode + d, 2, total_screens)
     end
-    redraw()
     return
   end
 
@@ -1625,7 +1613,6 @@ function enc(n, d)
       params:delta(param_id, d)
     end
   end
-  redraw()
 end
 
 function redraw()
