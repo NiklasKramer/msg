@@ -131,8 +131,6 @@ Engine_MSG : CroneEngine {
 				start=0, end=1, loop_fade=1024;
 
 			var wrapTrig_a, wrapTrig_b, loopFadeEnv_a, loopFadeEnv_b, laggedCrossfade;
-			var resetTrig_a, resetTrig_b, safeResetPos_a, safeResetPos_b;
-			var manualReset_a, manualReset_b, finalReset_a, finalReset_b;
 
 			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch, selected_buf_pos,
 			    fadeSamples, fadeIn_a, fadeOut_a, fadeEnv_a, fadeIn_b, fadeOut_b, fadeEnv_b;
@@ -173,20 +171,6 @@ Engine_MSG : CroneEngine {
 			reset_pos_a = Latch.kr(pos * bufFrames, aOrB);
 			reset_pos_b = Latch.kr(pos * bufFrames, 1 - aOrB);
 
-			// Manual reset position from pos argument, only when t_reset_pos is triggered
-			manualReset_a = Latch.kr(pos * bufFrames, aOrB);
-			manualReset_b = Latch.kr(pos * bufFrames, 1 - aOrB);
-
-			// Safety check: if Phasor escapes loop range, trigger reset (detect changes using HPZ1)
-			resetTrig_a = HPZ1.kr((reset_pos_a < startFrames) | (reset_pos_a > endFrames)).abs;
-			resetTrig_b = HPZ1.kr((reset_pos_b < startFrames) | (reset_pos_b > endFrames)).abs;
-
-			safeResetPos_a = Select.kr(reset_pos_a < startFrames, [startFrames, endFrames]);
-			safeResetPos_b = Select.kr(reset_pos_b < startFrames, [startFrames, endFrames]);
-
-			// Final reset position: use manual reset only when t_reset_pos is triggered, otherwise use safe reset
-			finalReset_a = Select.kr(t_reset_pos, [safeResetPos_a, manualReset_a]);
-			finalReset_b = Select.kr(t_reset_pos, [safeResetPos_b, manualReset_b]);
 
 			updated_semitones = octaves * 12 + semitones;
 			semitones_in_hz = (2 ** (updated_semitones / 12.0));
@@ -198,19 +182,19 @@ Engine_MSG : CroneEngine {
 			wobble_rate = BufRateScale.kr(bufnum: buf1) * speed * semitones_in_hz * wobble_lfo * direction;
 
 			t_buf_pos_a = Phasor.ar(
-				trig: (aOrB + resetTrig_a),
+				trig: (aOrB ),
 				rate: wobble_rate,
 				start: startFrames,
 				end: endFrames,
-				resetPos: finalReset_a
+				resetPos: reset_pos_a
 			);
 
 			t_buf_pos_b = Phasor.ar(
-				trig: (1 - aOrB + resetTrig_b),
+				trig: (1 - aOrB ),
 				rate: wobble_rate,
 				start: startFrames,
 				end: endFrames,
-				resetPos: finalReset_b
+				resetPos: reset_pos_b
 			);
 			wrapTrig_a = Select.kr((t_buf_pos_a > (endFrames - 1)).asInteger, [0, 1]);
 			loopFadeEnv_a = EnvGen.ar(Env([1, 0, 1], [0.001, 0.001]), wrapTrig_a);
