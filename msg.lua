@@ -19,20 +19,18 @@ local selected_arc = 1
 local arc_params = {
   [1] = { "position", "speed", "size", "density" },
   [2] = { "volume", "spread", "jitter", "filter" },
-  [3] = { "filterbank", "saturation", "reverb", "delay" },
-  [4] = { "position", "loop_start", "loop_end", "loop_start" }
+  [3] = { "reverb", "delay", nil, nil },
+  [4] = { "position", "loop_start", "loop_end", nil }
 }
 
 local screen_pages = {
   [1] = {
     title = "Voice A",
     params = {
-      { id = "volume",     label = "Volume",  format = "%.1f dB" },
-      { id = "pan",        label = "Pan",     format = "%.2f" },
-      { id = "filterbank", label = "FB Send" },
-      { id = "saturation", label = "Sat Send" },
-      { id = "reverb",     label = "Rev Send" },
-      { id = "delay",      label = "Del Send" }
+      { id = "volume", label = "Volume",  format = "%.1f dB" },
+      { id = "pan",    label = "Pan",     format = "%.2f" },
+      { id = "reverb", label = "Rev Send" },
+      { id = "delay",  label = "Del Send" }
     }
   },
   [2] = {
@@ -88,7 +86,7 @@ local speed_display_values = { 0, 12.5, 25, 50, 100, 200, 400, 800 }
 
 -- Global screen mode variable
 local screen_mode = 1
-local total_screens = 5
+local total_screens = 3
 screen_submode = 1
 screen_submode_max = #screen_pages
 
@@ -105,8 +103,6 @@ local STATES = 16
 
 -- Parameter lists for each screen
 
-local filterbank_params = { "filterbank_q", "filterbank_reverb", "filterbank_delay", "filterbank_saturation" }
-local saturation_params = { "saturation_depth", "saturation_rate", "crossover", "dist", "cutoff" }
 local delay_params = { "delay_time", "delay_feedback", "delay_lpf", "delay_hpf", "delay_w_depth" }
 local reverb_params = { "reverb_mix", "reverb_time", "reverb_lpf", "reverb_hpf", "reverb_srate" }
 
@@ -144,6 +140,8 @@ local grid_voc = gridbuf.new(16, 16)
 local metro_grid_refresh
 local metro_blink
 local metro_swell
+local metro_redraw
+local metro_arc_update
 
 -- Recording and playback
 local grid_pattern_banks = {}
@@ -169,10 +167,6 @@ local min_speed = -800
 local max_speed = 800
 local min_position = 0
 local max_position = 1
-local min_filterbank = -60
-local max_filterbank = 20
-local min_saturation = -60
-local max_saturation = 20
 local min_reverb = -60
 local max_reverb = 20
 local min_delay = -60
@@ -193,10 +187,6 @@ local min_volume = -60
 local max_volume = 20
 local min_delay_send = -60
 local max_delay_send = 20
-local min_filterbank_send = -60
-local max_filterbank_send = 20
-local min_saturation_send = -60
-local max_saturation_send = 20
 local min_reverb_send = -60
 local max_reverb_send = 20
 
@@ -218,14 +208,12 @@ local LFO_TARGETS = {
   TREMOLO_DEPTH = 13,
   TREMOLO_RATE = 14,
   WOBBLE = 15,
-  FILTERBANK = 16,
-  SATURATION = 17,
-  DELAY = 18,
-  REVERB = 19,
-  LOOP_START = 20,
-  LOOP_END = 21,
-  GLIDE = 22,
-  FINETUNE = 23
+  DELAY = 16,
+  REVERB = 17,
+  LOOP_START = 18,
+  LOOP_END = 19,
+  GLIDE = 20,
+  FINETUNE = 21
 }
 
 local LFO_TARGET_OPTIONS = {
@@ -244,8 +232,6 @@ local LFO_TARGET_OPTIONS = {
   { "Trem Depth",    LFO_TARGETS.TREMOLO_DEPTH },
   { "Trem Rate",     LFO_TARGETS.TREMOLO_RATE },
   { "Wobble",        LFO_TARGETS.WOBBLE },
-  { "Filterbank",    LFO_TARGETS.FILTERBANK },
-  { "Saturation",    LFO_TARGETS.SATURATION },
   { "Delay",         LFO_TARGETS.DELAY },
   { "Reverb",        LFO_TARGETS.REVERB },
   { "Loop Start",    LFO_TARGETS.LOOP_START },
@@ -306,26 +292,22 @@ end
 
 
 local function record_arc_event(n, d)
-  if record_bank <= 0 then return end
+  if record_bank <= 0 or d == 0 then return end
 
-  local arc_snapshot = { {}, {}, {}, {} }
-  local current_time = util.time()
-  record_prevtime = record_prevtime < 0 and current_time or record_prevtime
-
+  -- Special case: encoder 4 in mode 4 records both loop_start and loop_end
   if selected_arc == 4 and n == 4 then
-    arc_snapshot[4][2] = params:get(selected_voice .. "loop_start")
-    arc_snapshot[4][3] = params:get(selected_voice .. "loop_end")
-  else
-    local param_name = arc_params[selected_arc][n]
-    if param_name then
-      arc_snapshot[selected_arc][n] = params:get(selected_voice .. param_name)
-    end
+    local loop_start = params:get(selected_voice .. "loop_start")
+    local loop_end = params:get(selected_voice .. "loop_end")
+    record_pattern(arc_pattern_banks, { 'arc', selected_arc, n, selected_voice, loop_start, loop_end })
+    return
   end
 
-  if d ~= 0 then
-    local time_delta = current_time - record_prevtime
-    record_pattern(arc_pattern_banks, { 'arc', arc_snapshot, selected_voice })
-  end
+  local param_name = arc_params[selected_arc][n]
+  if not param_name then return end
+
+  local param_id = selected_voice .. param_name
+  local param_value = params:get(param_id)
+  record_pattern(arc_pattern_banks, { 'arc', selected_arc, n, selected_voice, param_value })
 end
 
 local function start_playback(n)
@@ -374,14 +356,20 @@ local function stop_recording()
   record_prevtime = -1
 end
 
-local function playback_arc_event(arc_data, voice)
-  for i = 1, 4 do
-    for j = 1, 4 do
-      if arc_data[i][j] ~= nil then
-        params:set(voice .. arc_params[i][j], arc_data[i][j])
-      end
-    end
+local function playback_arc_event(event)
+  local delta, eventType, arc_mode, encoder, voice, value1, value2 = table.unpack(event)
+
+  -- Special case: encoder 4 in mode 4 has two values (loop_start and loop_end)
+  if arc_mode == 4 and encoder == 4 and value2 then
+    params:set(voice .. "loop_start", value1)
+    params:set(voice .. "loop_end", value2)
+    return
   end
+
+  local param_name = arc_params[arc_mode][encoder]
+  if not param_name then return end
+
+  params:set(voice .. param_name, value1)
 end
 
 local function playback_grid_event(event)
@@ -391,7 +379,6 @@ local function playback_grid_event(event)
     grid_key(x, y, z, true)
   elseif eventType == 'control' then
     with_voice(voice, function()
-      print("direction", params:get(selected_voice .. "direction"))
       if y == control_row then
         if x == 1 then
           local hold = params:get(selected_voice .. "hold")
@@ -449,30 +436,30 @@ local function pattern_next(n)
   local arc_bank = arc_pattern_banks[n]
   local pos = pattern_positions[n]
 
-  local grid_event = grid_bank and grid_bank[pos]
-  local arc_event = arc_bank and arc_bank[pos]
+  local grid_event = grid_bank[pos]
+  local arc_event = arc_bank[pos]
 
+  -- Play whichever event exists at this position
   if grid_event then
     playback_grid_event(grid_event)
   elseif arc_event then
-    local delta, eventType, arc_data, voice = table.unpack(arc_event)
+    local eventType = arc_event[2]
     if eventType == 'arc' then
-      playback_arc_event(arc_data, voice)
+      playback_arc_event(arc_event)
     end
   end
 
+  -- Calculate next position
   local next_pos = pos + 1
-  if next_pos > #grid_bank and next_pos > #arc_bank then
+  local max_pos = math.max(#grid_bank, #arc_bank)
+  if next_pos > max_pos then
     next_pos = 1
   end
   pattern_positions[n] = next_pos
 
-  local next_delta = 1
-  if grid_bank and grid_bank[next_pos] then
-    next_delta = grid_bank[next_pos][1]
-  elseif arc_bank and arc_bank[next_pos] then
-    next_delta = arc_bank[next_pos][1]
-  end
+  -- Get next delta time
+  local next_event = grid_bank[next_pos] or arc_bank[next_pos]
+  local next_delta = next_event and next_event[1] or 1
   pattern_timers[n]:start(next_delta, 1)
 end
 
@@ -657,30 +644,25 @@ function grid_refresh()
 
   -- Speed display in control row
   local speed = params:get(selected_voice .. "speed")
-  local max_brightness = 15
-
-  local function calculate_brightness(speed, value)
-    if speed == 0 and value == 0 then
-      return 2
-    end
-    local diff = math.abs(speed - value)
-    if diff == 0 then
-      return max_brightness
-    elseif diff < math.abs(speed) then
-      return max_brightness - math.floor((diff / math.abs(speed)) * (max_brightness - 1))
-    else
-      return 0
-    end
-  end
   for i, value in ipairs(speed_display_values) do
     local col = i + 8
-    local level = calculate_brightness(math.abs(speed), value)
+    local distance = math.abs(math.log(math.abs(speed) + 1e-5) - math.log(value + 1e-5))
+    local level
+
+    if math.abs(speed - value) < 1e-2 then
+      level = 15 -- exact match
+    elseif value == 100 then
+      level = 6  -- always show unity
+    elseif distance < 0.5 then
+      level = 8  -- nearby
+    elseif distance < 1 then
+      level = 4  -- further away
+    else
+      level = 1  -- default dim
+    end
+
     grid_ctl:led_level_set(col, control_row, level)
   end
-  if math.abs(speed) < 100 then
-    grid_ctl:led_level_set(13, control_row, 1)
-  end
-  grid_ctl:led_level_set(9, control_row, 1)
 
   -- Direction, hold, granular, mute, record indicators in control row
   local direction = params:get(selected_voice .. "direction") >= 0 and 1 or -1
@@ -912,10 +894,10 @@ function init_metros()
   end, 1 / 30)
   metro_swell:start()
 
-  local metro_redraw = metro.init(function(stage) redraw() end, 1 / 10)
+  metro_redraw = metro.init(function(stage) redraw() end, 1 / 10)
   metro_redraw:start()
 
-  local metro_arc_update = metro.init(function(stage)
+  metro_arc_update = metro.init(function(stage)
     update_arc_display()
   end, 1 / 30)
   metro_arc_update:start()
@@ -939,10 +921,8 @@ function init_params()
   init_sample_params()
   init_buffers_for_voice()
   params:add_separator("FX")
-  init_saturation_params()
   init_delay_params()
   init_reverb_params()
-  init_filterbank_params()
   init_voice_params()
   init_global_and_hidden_params()
 end
@@ -964,37 +944,6 @@ function init_buffers_for_voice()
     params:add_number(v .. "selected_buffer", v .. " buffer", 1, VOICES, v)
     params:set_action(v .. "selected_buffer", function(value) engine.set_buffer_for_voice(v, value) end)
   end
-end
-
-function init_saturation_params()
-  params:add_group("SATURATION", 9)
-
-  params:add_taper("saturation_depth", "Saturation Depth", 1, 32, 32, 0)
-  params:set_action("saturation_depth", function(value) engine.saturation_depth(value) end)
-
-  params:add_taper("saturation_rate", "Saturation Rate", 1, 48000, 48000, 0)
-  params:set_action("saturation_rate", function(value) engine.saturation_rate(value) end)
-
-  params:add_taper('crossover', 'Crossover', 50, 20000, 1400, 0)
-  params:set_action('crossover', function(value) engine.saturation_crossover(value) end)
-
-  params:add_taper('dist', 'Distortian', 1, 500, 15, 0)
-  params:set_action('dist', function(value) engine.saturation_dist(value) end)
-
-  params:add_taper('low bias', 'Low Bias', 0.01, 1, 0.04, 0)
-  params:set_action('low bias', function(value) engine.saturation_lowbias(value) end)
-
-  params:add_taper('high bias', 'High Bias', 0.01, 1, 0.12, 0)
-  params:set_action('high bias', function(value) engine.saturation_highbias(value) end)
-
-  params:add_taper('hiss', 'Hiss', 0, 1, 0, 0)
-  params:set_action('hiss', function(value) engine.saturation_hiss(value) end)
-
-  params:add_taper('cutoff', 'Cutoff', 20, 20000, 11500, 0)
-  params:set_action('cutoff', function(value) engine.saturation_cutoff(value) end)
-
-  params:add_taper('output_volume', 'Output Volume', 0, 1, 1, 0)
-  params:set_action('output_volume', function(value) engine.saturation_volume(value) end)
 end
 
 function init_delay_params()
@@ -1047,56 +996,10 @@ function init_reverb_params()
   params:set_action("reverb_srate", function(value) engine.reverb_srate(value) end)
 end
 
-function init_filterbank_params()
-  params:add_group("FILTERBANK", 14)
-
-  params:add_taper("filterbank_amp", "Filterbank Amp", 0, 1, 1, 0, "")
-  params:set_action("filterbank_amp", function(value) engine.filterbank_amp(value) end)
-
-  params:add_taper("filterbank_gate", "Filterbank Gate", 0, 1, 1, 0, "")
-  params:set_action("filterbank_gate", function(value) engine.filterbank_gate(value) end)
-
-  params:add_taper("filterbank_spread", "Filterbank Spread", 0, 1, 1, 0, "")
-  params:set_action("filterbank_spread", function(value) engine.filterbank_spread(value) end)
-
-  params:add_taper("filterbank_q", "Filterbank Q", 0.0001, 1, 0.1, 0, "")
-  params:set_action("filterbank_q", function(value) engine.filterbank_q(value) end)
-
-  params:add_taper("filterbank_modRate", "Filterbank Modulation Rate", 0.1, 10, 0.2, 0, "")
-  params:set_action("filterbank_modRate", function(value) engine.filterbank_modRate(value) end)
-
-  params:add_taper("filterbank_depth", "Filterbank Depth", 0, 1, 0.5, 0, "")
-  params:set_action("filterbank_depth", function(value) engine.filterbank_depth(value) end)
-
-  params:add_taper("filterbank_qModRate", "Filterbank Q Modulation Rate", 0.1, 10, 0.1, 0, "")
-  params:set_action("filterbank_qModRate", function(value) engine.filterbank_qModRate(value) end)
-
-  params:add_taper("filterbank_qModDepth", "Filterbank Q Modulation Depth", 0, 1, 0.01, 0, "")
-  params:set_action("filterbank_qModDepth", function(value) engine.filterbank_qModDepth(value) end)
-
-  params:add_taper("filterbank_panModRate", "Filterbank Pan Modulation Rate", 0.1, 10, 0.4, 0, "")
-  params:set_action("filterbank_panModRate", function(value) engine.filterbank_panModRate(value) end)
-
-  params:add_taper("filterbank_panModDepth", "Filterbank Pan Modulation Depth", 0, 1, 1, 0, "")
-  params:set_action("filterbank_panModDepth", function(value) engine.filterbank_panModDepth(value) end)
-
-  params:add_taper("filterbank_wet", "Filterbank Wet Level", 0, 1, 1, 0, "")
-  params:set_action("filterbank_wet", function(value) engine.filterbank_wet(value) end)
-
-  params:add_taper("filterbank_reverb", "Filterbank Reverb Send", 0, 1, 0, 0, "")
-  params:set_action("filterbank_reverb", function(value) engine.filterbank_reverb_level(value) end)
-
-  params:add_taper("filterbank_delay", "Filterbank Delay Send", 0, 1, 0, 0, "")
-  params:set_action("filterbank_delay", function(value) engine.filterbank_delay_level(value) end)
-
-  params:add_taper("filterbank_saturation", "Filterbank Saturation Send", 0, 1, 0, 0, "")
-  params:set_action("filterbank_saturation", function(value) engine.filterbank_saturation_level(value) end)
-end
-
 function init_global_and_hidden_params()
   params:add_separator("")
   params:add_separator('header', 'ARC + General')
-  params:add_option('arc_rotation', "Rotation", { 0, 90, 180, 270 }, 4)
+  params:add_option('arc_rotation', "Rotation", { 0, 90, 180, 270 }, 1)
   params:add_control("arc_sens_1", "Arc Sensitivity 1", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
   params:add_control("arc_sens_2", "Arc Sensitivity 2", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
   params:add_control("arc_sens_3", "Arc Sensitivity 3", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
@@ -1126,7 +1029,7 @@ end
 function init_voice_params()
   for v = 1, VOICES do
     params:add_separator("VOICE " .. v)
-    params:add_group("AUDIO", 36)
+    params:add_group("AUDIO", 56)
 
     init_playback_control_params(v)
     init_level_and_send_params(v)
@@ -1235,11 +1138,23 @@ function init_playback_control_params(v)
 
   params:add_taper(v .. "loop_start", "Loop Start", 0, 1, 0, 0)
   params:set_action(v .. "loop_start", function(value)
+    local loop_end = params:get(v .. "loop_end")
+    -- Ensure loop_start doesn't exceed loop_end
+    if value > loop_end then
+      value = loop_end
+      params:set(v .. "loop_start", value)
+    end
     engine.loop_start(v, value)
   end)
 
   params:add_taper(v .. "loop_end", "Loop End", 0, 1, 1, 0)
   params:set_action(v .. "loop_end", function(value)
+    local loop_start = params:get(v .. "loop_start")
+    -- Ensure loop_end doesn't go below loop_start
+    if value < loop_start then
+      value = loop_start
+      params:set(v .. "loop_end", value)
+    end
     engine.loop_end(v, value)
   end)
 end
@@ -1274,19 +1189,11 @@ function init_level_and_send_params(v)
   params:add_taper(v .. "wobble", "Wobble", 0, 1, 0, 0)
   params:set_action(v .. "wobble", function(value) engine.wobble(v, value) end)
 
-  params:add_taper(v .. "saturation", "Saturation Send", min_saturation_send, max_saturation_send, min_delay_send, 0,
-    "dB")
-  params:set_action(v .. "saturation", function(value) engine.saturation(v, math.pow(10, value / 20)) end)
-
   params:add_taper(v .. "delay", "Delay Send", min_delay_send, max_delay_send, min_delay_send, 0, "dB")
   params:set_action(v .. "delay", function(value) engine.delay(v, math.pow(10, value / 20)) end)
 
   params:add_taper(v .. "reverb", "Reverb Send", min_reverb_send, max_reverb_send, min_delay_send, 0, "dB")
   params:set_action(v .. "reverb", function(value) engine.reverb(v, math.pow(10, value / 20)) end)
-
-  params:add_taper(v .. "filterbank", "Filterbank Send", min_filterbank_send, max_filterbank_send, min_delay_send, 0,
-    "dB")
-  params:set_action(v .. "filterbank", function(value) engine.filterbank(v, math.pow(10, value / 20)) end)
 end
 
 function init_granular_params(v)
@@ -1371,9 +1278,25 @@ function arc_enc_update(n, d)
   local sensitivity = params:get("arc_sens_" .. n)
   local adjusted_delta = d * sensitivity
 
-  local param_name = arc_params[selected_arc][n]
+  -- Special case: encoder 4 in mode 4 shifts entire loop
+  if selected_arc == 4 and n == 4 then
+    local loop_start = params:get(selected_voice .. "loop_start")
+    local loop_end = params:get(selected_voice .. "loop_end")
+    local loop_length = loop_end - loop_start
 
-  -- position is a special case
+    -- Prevent negative loop length
+    if loop_length <= 0 then loop_length = 0.01 end
+
+    local delta_pos = adjusted_delta / 100
+    local new_start = util.clamp(loop_start + delta_pos, 0, 1 - loop_length)
+    local new_end = new_start + loop_length
+
+    params:set(selected_voice .. "loop_start", new_start)
+    params:set(selected_voice .. "loop_end", new_end)
+    return
+  end
+
+  local param_name = arc_params[selected_arc][n]
   if not param_name then return end
   local param_id = selected_voice .. param_name
 
@@ -1382,30 +1305,6 @@ function arc_enc_update(n, d)
     newPosition = newPosition % 1
     positions[selected_voice] = newPosition
     params:set(param_id, newPosition)
-    return
-  end
-
-  if selected_arc == 4 and n == 4 then
-    local position = positions[selected_voice]
-    -- local position_angle = arc_utils.scale_angle(position, 1)
-    -- arc_device:segment(1, position_angle, position_angle + 0.2, 15)
-
-    local param_start = selected_voice .. "loop_start"
-    local param_end = selected_voice .. "loop_end"
-    local loop_start = params:get(param_start)
-    local loop_end = params:get(param_end)
-    local playhead = positions[selected_voice] or 0
-    local loop_active = params:get(selected_voice .. "loop_on") == 1
-
-    arc_utils.display_loop_start_params(arc_device, 2, loop_start, loop_end, playhead, loop_active)
-    arc_utils.display_loop_end_params(arc_device, 3, loop_start, loop_end, playhead, loop_active)
-
-    local loop_length = loop_end - loop_start
-    local delta_pos = adjusted_delta / 100
-    local new_start = util.clamp(loop_start + delta_pos, 0, 1 - loop_length)
-    local new_end = new_start + loop_length
-    params:set(param_start, new_start)
-    params:set(param_end, new_end)
     return
   end
 
@@ -1437,7 +1336,6 @@ function update_arc_display()
   elseif selected_arc == 2 then
     -- Display parameters for arc screen mode
     local volume = params:get(selected_voice .. "volume")
-    print(volume)
     local spread = params:get(selected_voice .. "spread")
     local jitter = params:get(selected_voice .. "jitter")
     local filter = params:get(selected_voice .. "filter")
@@ -1447,16 +1345,17 @@ function update_arc_display()
     arc_utils.display_random_pattern(arc_device, 3, jitter, 0, max_jitter)
     arc_utils.display_filter_pattern(arc_device, 4, filter, 0, max_filter)
   elseif selected_arc == 3 then
-    -- Display parameters for arc screen mode
-    local filterbank = params:get(selected_voice .. "filterbank")
-    local saturation = params:get(selected_voice .. "saturation")
+    -- Display parameters for arc screen mode (only using encoders 1 & 2)
     local reverb = params:get(selected_voice .. "reverb")
     local delay = params:get(selected_voice .. "delay")
 
-    arc_utils.display_progress_bar(arc_device, 1, filterbank, min_filterbank, max_filterbank)
-    arc_utils.display_progress_bar(arc_device, 2, saturation, min_saturation, max_saturation)
-    arc_utils.display_progress_bar(arc_device, 3, reverb, min_reverb, max_reverb)
-    arc_utils.display_progress_bar(arc_device, 4, delay, min_delay, max_delay)
+    arc_utils.display_progress_bar(arc_device, 1, reverb, min_reverb, max_reverb)
+    arc_utils.display_progress_bar(arc_device, 2, delay, min_delay, max_delay)
+    -- Clear unused encoders
+    for led = 1, 64 do
+      arc_device:led(3, led, 0)
+      arc_device:led(4, led, 0)
+    end
   elseif selected_arc == 4 then
     local position = positions[selected_voice]
     local position_angle = arc_utils.scale_angle(position, 1)
@@ -1485,12 +1384,8 @@ function get_param_list(screen_mode, screen_submode)
     end
     return param_list
   elseif screen_mode == 2 then
-    return filterbank_params
-  elseif screen_mode == 3 then
-    return saturation_params
-  elseif screen_mode == 4 then
     return delay_params
-  elseif screen_mode == 5 then
+  elseif screen_mode == 3 then
     return reverb_params
   else
     return {}
@@ -1621,9 +1516,9 @@ function redraw()
   if screen_mode == 1 then
     redraw_screen_1()
   else
-    local titles = { "FB", "ST", "DL", "RE" }
-    local param_groups = { filterbank_params, saturation_params, delay_params, reverb_params }
-    local strip_lengths = { 12, nil, 7, 8 }
+    local titles = { "DL", "RE" }
+    local param_groups = { delay_params, reverb_params }
+    local strip_lengths = { 7, 8 }
     local index = screen_mode - 1
     draw_param_list(titles[index], param_groups[index], selected_param[screen_mode], strip_lengths[index])
   end
@@ -1778,7 +1673,7 @@ function update_lfo_ranges()
       elseif target == LFO_TARGETS.TREMOLO_RATE then
         lfos[v][lfo_num]:set('min', 0)
         lfos[v][lfo_num]:set('max', 20)
-      elseif target == LFO_TARGETS.FILTERBANK or target == LFO_TARGETS.SATURATION or target == LFO_TARGETS.DELAY or target == LFO_TARGETS.REVERB then
+      elseif target == LFO_TARGETS.DELAY or target == LFO_TARGETS.REVERB then
         lfos[v][lfo_num]:set('min', -60)
         lfos[v][lfo_num]:set('max', 20)
       elseif target == LFO_TARGETS.LOOP_START or target == LFO_TARGETS.LOOP_END then
@@ -1829,10 +1724,6 @@ function lfo_action(voice, lfo_num, scaled)
     params:set(voice .. "tremolo_rate", scaled)
   elseif target == LFO_TARGETS.WOBBLE then
     params:set(voice .. "wobble", scaled)
-  elseif target == LFO_TARGETS.FILTERBANK then
-    params:set(voice .. "filterbank", scaled)
-  elseif target == LFO_TARGETS.SATURATION then
-    params:set(voice .. "saturation", scaled)
   elseif target == LFO_TARGETS.DELAY then
     params:set(voice .. "delay", scaled)
   elseif target == LFO_TARGETS.REVERB then
@@ -1849,8 +1740,32 @@ function lfo_action(voice, lfo_num, scaled)
 end
 
 function cleanup()
+  -- Stop all LFOs
   for v = 1, VOICES do
-    lfos[v]:stop()
+    for lfo_num = 1, 4 do
+      if lfos[v] and lfos[v][lfo_num] then
+        lfos[v][lfo_num]:stop()
+      end
+    end
+  end
+
+  -- Stop all metros
+  if metro_grid_refresh then metro_grid_refresh:stop() end
+  if metro_blink then metro_blink:stop() end
+  if metro_swell then metro_swell:stop() end
+  if metro_redraw then metro_redraw:stop() end
+  if metro_arc_update then metro_arc_update:stop() end
+
+  -- Stop all pattern timers
+  for i = 1, RECORDER do
+    if pattern_timers[i] then
+      pattern_timers[i]:stop()
+    end
+  end
+
+  -- Stop all voices
+  for v = 1, VOICES do
+    stop_voice(v)
   end
 end
 
