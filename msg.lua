@@ -761,6 +761,9 @@ function handle_voice_loop(x, y, z)
         params:set(voice .. "loop_start", start_key / 16)
         params:set(voice .. "loop_end", end_key / 16)
         params:set(voice .. "loop_on", 1)
+
+        -- Clear loop_keys after setting loop
+        loop_keys[voice] = {}
       end
     elseif z == 0 then
       for i, pos in ipairs(loop_keys[voice] or {}) do
@@ -1138,23 +1141,11 @@ function init_playback_control_params(v)
 
   params:add_taper(v .. "loop_start", "Loop Start", 0, 1, 0, 0)
   params:set_action(v .. "loop_start", function(value)
-    local loop_end = params:get(v .. "loop_end")
-    -- Ensure loop_start doesn't exceed loop_end
-    if value > loop_end then
-      value = loop_end
-      params:set(v .. "loop_start", value)
-    end
     engine.loop_start(v, value)
   end)
 
   params:add_taper(v .. "loop_end", "Loop End", 0, 1, 1, 0)
   params:set_action(v .. "loop_end", function(value)
-    local loop_start = params:get(v .. "loop_start")
-    -- Ensure loop_end doesn't go below loop_start
-    if value < loop_start then
-      value = loop_start
-      params:set(v .. "loop_end", value)
-    end
     engine.loop_end(v, value)
   end)
 end
@@ -1291,6 +1282,7 @@ function arc_enc_update(n, d)
     local new_start = util.clamp(loop_start + delta_pos, 0, 1 - loop_length)
     local new_end = new_start + loop_length
 
+    -- Set both parameters
     params:set(selected_voice .. "loop_start", new_start)
     params:set(selected_voice .. "loop_end", new_end)
     return
@@ -1305,6 +1297,23 @@ function arc_enc_update(n, d)
     newPosition = newPosition % 1
     positions[selected_voice] = newPosition
     params:set(param_id, newPosition)
+    return
+  end
+
+  -- Clamping for loop parameters (scale delta for 0-1 range)
+  if param_name == "loop_start" then
+    local current = params:get(param_id)
+    local loop_end = params:get(selected_voice .. "loop_end")
+    local new_value = util.clamp(current + (adjusted_delta / 100), 0, loop_end)
+    params:set(param_id, new_value)
+    return
+  end
+
+  if param_name == "loop_end" then
+    local current = params:get(param_id)
+    local loop_start = params:get(selected_voice .. "loop_start")
+    local new_value = util.clamp(current + (adjusted_delta / 100), loop_start, 1)
+    params:set(param_id, new_value)
     return
   end
 
