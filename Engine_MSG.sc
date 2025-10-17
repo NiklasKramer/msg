@@ -112,7 +112,7 @@ Engine_MSG : CroneEngine {
 			]
 		});
 
-		SynthDef(\synth, {
+		SynthDef(\msg_voice, {
 			arg out=0, in=0, phase_out=0, level_out=0, 
 				delay_out=0, delay_level=0, 
 				reverb_out=0, reverb_level=0, 
@@ -129,7 +129,7 @@ Engine_MSG : CroneEngine {
 			var grain_trig, buf_dur, pan_sig, jitter_sig, buf_pos, pos_sig, sig, smooth_mute, pitch, selected_buf_pos,
 			    fadeSamples, fadeIn_a, fadeOut_a, fadeEnv_a, fadeIn_b, fadeOut_b, fadeEnv_b;
 			var aOrB, crossfade, reset_pos_a, reset_pos_b, updated_semitones, semitones_in_hz, clicky_sig, gran_sig;
-			var wobble_lfo_freq, wobble_lfo_depth, wobble_lfo, wobble_rate;
+			var wobble_lfo_freq, wobble_lfo_depth, wobble_lfo, buf_rate;
 			var t_buf_pos_a, t_buf_pos_b, buf_rd_left_a, buf_rd_right_a, buf_rd_left_b, buf_rd_right_b;
 			var env, level, cutoffFreqLPF, cutoffFreqHPF, dryAndHighPass, filtered, stereo_sig, tremoloLFO, signal, record_pos, reduced;
 
@@ -173,23 +173,29 @@ Engine_MSG : CroneEngine {
 			wobble_lfo_depth = LinLin.kr(wobble, 0, 1, 0.0, 0.1);
 			wobble_lfo = SinOsc.kr(wobble_lfo_freq, 0, wobble_lfo_depth, 1);
 
-			wobble_rate = BufRateScale.kr(bufnum: buf1) * speed * semitones_in_hz * wobble_lfo * direction;
+			// Stable playback rate for buffer mode (wobble applied as delay vibrato later)
+			buf_rate = BufRateScale.kr(bufnum: buf1) * speed * semitones_in_hz * direction;
 
 			t_buf_pos_a = Phasor.ar(
 				trig: (aOrB ),
-				rate: wobble_rate,
+				rate: buf_rate,
 				start: startFrames,
 				end: endFrames,
 				resetPos: reset_pos_a
 			);
+			// Wrap to ensure Phasor stays in bounds even when loop changes
+			t_buf_pos_a = Wrap.ar(t_buf_pos_a, startFrames, endFrames);
 
 			t_buf_pos_b = Phasor.ar(
 				trig: (1 - aOrB ),
-				rate: wobble_rate,
+				rate: buf_rate,
 				start: startFrames,
 				end: endFrames,
 				resetPos: reset_pos_b
 			);
+			// Wrap to ensure Phasor stays in bounds even when loop changes
+			t_buf_pos_b = Wrap.ar(t_buf_pos_b, startFrames, endFrames);
+			
 			wrapTrig_a = Select.kr((t_buf_pos_a > (endFrames - 1)).asInteger, [0, 1]);
 			loopFadeEnv_a = EnvGen.ar(Env([1, 0, 1], [0.001, 0.001]), wrapTrig_a);
 			
@@ -248,10 +254,13 @@ Engine_MSG : CroneEngine {
 
 			sig = Select.ar(clicky, [sig, clicky_sig]);
 
-			
-			// Bitcrusher
-			reduced = Decimator.ar(sig, rate: sampleRate, bits: bitDepth);
+			// Bitcrusher (smooth decimation)
+			reduced = SmoothDecimator.ar(sig, rate: sampleRate, bits: bitDepth);
 			sig = XFade2.ar(sig, reduced, (reductionMix * 2) - 1);
+
+			// Apply wobble as vibrato using delay modulation (unified for both modes)
+			// Modulate delay time for pitch variation (like tape wow/flutter)
+			sig = DelayC.ar(sig, 0.02, LinLin.kr(wobble_lfo, 0.9, 1.1, 0.001, 0.01));
 
 			// Apply tremolo
 			tremoloLFO = SinOsc.kr(Lag.kr(tremolo_rate, 0.1), 0, tremolo_depth, 1);
@@ -352,7 +361,7 @@ Engine_MSG : CroneEngine {
 		pg = ParGroup.head(context.xg);
 
 		voices = Array.fill(nvoices, { arg i;
-			Synth.new(\synth, [
+			Synth.new(\msg_voice, [
 				\out, context.out_b.index,
 				\phase_out, phases[i].index,
 				\level_out, levels[i].index,
@@ -466,7 +475,13 @@ Engine_MSG : CroneEngine {
 
 		this.addCommand("record", "if", { arg msg;
 			var voice = msg[1] - 1;
-			voices[voice].set(\record, msg[2]);
+			var rec_state = msg[2];
+			voices[voice].set(\record, rec_state);
+			// Clear buffer when starting to record (prevents hearing old content)
+			if (rec_state == 1, {
+				buffers[voice][0].zero;
+				buffers[voice][1].zero;
+			});
 		});
 
 		this.addCommand("set_buffer_for_voice", "ii", { arg msg;

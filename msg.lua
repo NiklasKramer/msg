@@ -189,6 +189,7 @@ local min_delay_send = -60
 local max_delay_send = 20
 local min_reverb_send = -60
 local max_reverb_send = 20
+local min_loop_length = 0.001 -- Minimum 0.1% of buffer (just above 0 to prevent zero-length loops)
 
 
 
@@ -757,9 +758,19 @@ function handle_voice_loop(x, y, z)
       if #loop_keys[voice] == 2 then
         table.sort(loop_keys[voice])
         local start_key, end_key = loop_keys[voice][1] - 1, loop_keys[voice][2] - 1
+        local loop_start_val = start_key / 16
+        local loop_end_val = end_key / 16
 
-        params:set(voice .. "loop_start", start_key / 16)
-        params:set(voice .. "loop_end", end_key / 16)
+        -- Enforce minimum loop length
+        if (loop_end_val - loop_start_val) < min_loop_length then
+          loop_end_val = loop_start_val + min_loop_length
+        end
+
+        -- Set loop parameters
+        params:set(voice .. "loop_start", loop_start_val)
+        params:set(voice .. "loop_end", loop_end_val)
+
+        -- Enable loop (this triggers the action which sends to engine)
         params:set(voice .. "loop_on", 1)
 
         -- Clear loop_keys after setting loop
@@ -1275,8 +1286,8 @@ function arc_enc_update(n, d)
     local loop_end = params:get(selected_voice .. "loop_end")
     local loop_length = loop_end - loop_start
 
-    -- Prevent negative loop length
-    if loop_length <= 0 then loop_length = 0.01 end
+    -- Enforce minimum loop length
+    if loop_length < min_loop_length then loop_length = min_loop_length end
 
     local delta_pos = adjusted_delta / 100
     local new_start = util.clamp(loop_start + delta_pos, 0, 1 - loop_length)
@@ -1304,7 +1315,7 @@ function arc_enc_update(n, d)
   if param_name == "loop_start" then
     local current = params:get(param_id)
     local loop_end = params:get(selected_voice .. "loop_end")
-    local new_value = util.clamp(current + (adjusted_delta / 100), 0, loop_end)
+    local new_value = util.clamp(current + (adjusted_delta / 100), 0, loop_end - min_loop_length)
     params:set(param_id, new_value)
     return
   end
@@ -1312,7 +1323,7 @@ function arc_enc_update(n, d)
   if param_name == "loop_end" then
     local current = params:get(param_id)
     local loop_start = params:get(selected_voice .. "loop_start")
-    local new_value = util.clamp(current + (adjusted_delta / 100), loop_start, 1)
+    local new_value = util.clamp(current + (adjusted_delta / 100), loop_start + min_loop_length, 1)
     params:set(param_id, new_value)
     return
   end
