@@ -252,7 +252,7 @@ function init_grid_rows()
     control_row = 15
     semitone_row = 16
     state_row = 14
-    VOICES = 6
+    VOICES = 8
     number_of_rows = 16
   end
 end
