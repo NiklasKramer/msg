@@ -1,6 +1,6 @@
 
 Engine_MSG : CroneEngine {
-	classvar nvoices = 8;
+	classvar nvoices = 7;
 
 	var pg;
 	var reverb;
@@ -219,8 +219,15 @@ Engine_MSG : CroneEngine {
 			selected_buf_pos = Select.ar(aOrB, [t_buf_pos_b, t_buf_pos_a]);
 			record_pos = Select.ar(useBufRd, [pos_sig, selected_buf_pos]);
 
-			BufWr.ar(signal[0], buf1*record, record_pos);
-			BufWr.ar(signal[1], buf2*record, record_pos);
+			// When recording: write input signal. When not recording: write back buffer content (no change)
+			BufWr.ar(
+				Select.ar(record, [BufRd.ar(1, buf1, record_pos, loop: 1), signal[0]]),
+				buf1, record_pos
+			);
+			BufWr.ar(
+				Select.ar(record, [BufRd.ar(1, buf2, record_pos, loop: 1), signal[1]]),
+				buf2, record_pos
+			);
 
 			gran_sig = Mix.ar(GrainBuf.ar(2, grain_trig, size, [buf1, buf2], pitch, (pos_sig + jitter_sig), 2, ([-1, 1] + pan_sig).clip(-1, 1))) / 2;
 

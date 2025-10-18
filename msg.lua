@@ -97,7 +97,7 @@ local loop_keys = {}
 
 -- Voice and control parameters
 local selected_voice = 1
-local VOICES = 8
+local VOICES = 7
 local RECORDER = 18
 local STATES = 16
 
@@ -253,7 +253,7 @@ function init_grid_rows()
     control_row = 15
     semitone_row = 16
     state_row = 14
-    VOICES = 8
+    VOICES = 7
     number_of_rows = 16
   end
 end
