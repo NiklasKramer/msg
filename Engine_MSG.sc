@@ -135,8 +135,9 @@ Engine_MSG : CroneEngine {
 
 			// Buffer frames variable for dynamic updates
 			var bufFrames = BufFrames.kr(bufnum: buf1);
-			var startFrames = start * bufFrames;
-			var endFrames = end * bufFrames;
+			// Tiny lag on boundaries to smooth Wrap when position is outside
+			var startFrames = Lag.kr(start, 0.01) * bufFrames;
+			var endFrames = Lag.kr(end, 0.01) * bufFrames;
 
 			speed = Lag.kr(speed, speed_lag_time );
 
@@ -162,10 +163,6 @@ Engine_MSG : CroneEngine {
 			semitones = Lag.kr(semitones, speed_lag_time);
 			octaves = Lag.kr(octaves, speed_lag_time);
 
-			reset_pos_a = Latch.kr(pos * bufFrames, aOrB);
-			reset_pos_b = Latch.kr(pos * bufFrames, 1 - aOrB);
-
-
 			updated_semitones = octaves * 12 + semitones;
 			semitones_in_hz = (2 ** (updated_semitones / 12.0));
 
@@ -175,6 +172,9 @@ Engine_MSG : CroneEngine {
 
 			// Stable playback rate for buffer mode (wobble applied as delay vibrato later)
 			buf_rate = BufRateScale.kr(bufnum: buf1) * speed * semitones_in_hz * direction;
+
+			reset_pos_a = Latch.kr(pos * bufFrames, aOrB);
+			reset_pos_b = Latch.kr(pos * bufFrames, 1 - aOrB);
 
 			t_buf_pos_a = Phasor.ar(
 				trig: (aOrB ),
