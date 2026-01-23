@@ -158,6 +158,9 @@ local blink = 0
 local swell = 0
 local swell_direction = 1
 
+-- Auto-save tracking
+local recorded_voices = {}
+
 -- MIN/MAX values for parameters
 local min_size = 1
 local max_size = 200
@@ -272,6 +275,25 @@ function init()
     local grid_pattern_serialized = params:get("pattern_" .. i .. "_grid")
     local arc_pattern_serialized = params:get("pattern_" .. i .. "_arc")
     load_pattern_from_param(i, grid_pattern_serialized, arc_pattern_serialized)
+  end
+
+  -- Set up auto-save hook for when PSETs are saved
+  params.action_write = function(filename, name, number)
+    print("MSG: PSET saved - " .. (name or "unnamed"))
+    if params:get("auto_save_buffers") == 1 then
+      print("MSG: Auto-save enabled, saving buffers...")
+      save_all_recorded_buffers(filename)
+    else
+      print("MSG: Auto-save disabled")
+    end
+  end
+
+  -- Set up hook to reload samples when PSET is loaded
+  params.action_read = function(filename, silent, number)
+    if params:get("auto_save_buffers") == 1 then
+      print("MSG: PSET loaded, restoring samples...")
+      load_saved_samples(filename)
+    end
   end
 
   params:bang()
@@ -1019,6 +1041,8 @@ function init_global_and_hidden_params()
   params:add_control("arc_sens_3", "Arc Sensitivity 3", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
   params:add_control("arc_sens_4", "Arc Sensitivity 4", controlspec.new(0.01, 2, 'lin', 0.01, 0.5))
 
+  params:add_binary("auto_save_buffers", "Auto-save Buffers", "toggle", 1)
+
   -- Hidden params
   for v = 1, VOICES do
     params:add_number(v .. "semitones_precise", v .. ": semitones_precise", min_semitones, max_semitones, 0)
@@ -1112,6 +1136,10 @@ function init_playback_control_params(v)
   params:set_action(v .. "record", function(value)
     params:set(v .. "granular", 1)
     engine.record(v, value)
+    -- Track that this voice has been used for recording
+    if value == 1 then
+      recorded_voices[v] = true
+    end
   end)
 
   params:add_binary(v .. "mute", "Mute", "toggle", 1)
@@ -1131,10 +1159,19 @@ function init_playback_control_params(v)
 
   params:add_binary(v .. "save_buffer", "Save Buffer")
   params:set_action(v .. "save_buffer", function()
-    local timestamp = os.date("%Y%m%d%H%M%S")
-    local filepath = '/home/we/dust/audio/MSG/' .. timestamp .. 'buffer_' .. v .. '.wav'
+    local timestamp = os.date("%Y%m%d_%H%M%S")
+    local save_dir = _path.audio .. 'MSG/'
+    util.make_dir(save_dir)
+    local filepath = save_dir .. timestamp .. '_buffer_' .. v .. '.wav'
     engine.save_buffer(v, filepath)
-    params:set(v .. "sample", filepath)
+    -- Mark this voice as having a recorded buffer
+    recorded_voices[v] = true
+    -- Wait for file to be written before setting sample param
+    clock.run(function()
+      clock.sleep(0.5)
+      params:set(v .. "sample", filepath)
+      print("Saved buffer " .. v .. " to " .. filepath)
+    end)
   end)
 
   params:add_separator("LOOPING")
@@ -1466,12 +1503,18 @@ function key(n, z)
             clock.sleep(1)
           end)
         elseif selected_param_id == 3 then
-          local timestamp = os.date("%Y%m%d%H%M%S")
-          local filepath = '/home/we/dust/audio/MSG/' .. timestamp .. 'buffer_' .. selected_voice .. '.wav'
+          local timestamp = os.date("%Y%m%d_%H%M%S")
+          local save_dir = _path.audio .. 'MSG/'
+          util.make_dir(save_dir)
+          local filepath = save_dir .. timestamp .. '_buffer_' .. selected_voice .. '.wav'
           engine.save_buffer(selected_voice, filepath)
-          params:set(selected_voice .. "sample", filepath)
+          -- Mark this voice as having a recorded buffer
+          recorded_voices[selected_voice] = true
+          -- Wait for file to be written before setting sample param
           clock.run(function()
-            clock.sleep(1)
+            clock.sleep(0.5)
+            params:set(selected_voice .. "sample", filepath)
+            print("Saved buffer " .. selected_voice .. " to " .. filepath)
           end)
         end
       else
@@ -1811,5 +1854,70 @@ function load_pattern_from_param(n, grid_serialized, arc_serialized)
     arc_pattern_banks[n] = utils.deserialize_table(arc_serialized)
   else
     arc_pattern_banks[n] = {}
+  end
+end
+
+-- Function to save all recorded buffers automatically
+function save_all_recorded_buffers(pset_filename)
+  clock.run(function()
+    local saved_count = 0
+    local timestamp = os.date("%Y%m%d_%H%M%S")
+    local save_dir = _path.audio .. 'MSG/'
+    local sample_data = {}
+
+    -- Ensure directory exists
+    util.make_dir(save_dir)
+    print("MSG: Save directory: " .. save_dir)
+
+    -- Debug: show which voices have been recorded
+    for v = 1, VOICES do
+      if recorded_voices[v] then
+        print("MSG: Voice " .. v .. " has recording")
+      end
+    end
+
+    for v = 1, VOICES do
+      if recorded_voices[v] then
+        local filepath = save_dir .. timestamp .. '_buffer_' .. v .. '.wav'
+        print("MSG: Saving buffer " .. v .. " to " .. filepath)
+        engine.save_buffer(v, filepath)
+        -- Wait for file to be written
+        clock.sleep(0.5)
+        params:set(v .. "sample", filepath)
+        sample_data[v] = filepath
+        saved_count = saved_count + 1
+      end
+    end
+
+    if saved_count > 0 then
+      print("MSG: Auto-saved " .. saved_count .. " buffer(s)")
+      -- Save companion data file with sample mappings
+      local data_filename = pset_filename .. ".samples"
+      tab.save(sample_data, data_filename)
+      print("MSG: Saved sample data to " .. data_filename)
+    else
+      print("MSG: No buffers to save (no recorded voices)")
+    end
+  end)
+end
+
+-- Function to load saved samples when PSET is loaded
+function load_saved_samples(pset_filename)
+  local data_filename = pset_filename .. ".samples"
+  if util.file_exists(data_filename) then
+    local sample_data = tab.load(data_filename)
+    if sample_data then
+      for v, filepath in pairs(sample_data) do
+        if util.file_exists(filepath) then
+          params:set(v .. "sample", filepath)
+          recorded_voices[v] = true
+          print("MSG: Restored sample for voice " .. v .. ": " .. filepath)
+        else
+          print("MSG: Warning - sample file not found: " .. filepath)
+        end
+      end
+    end
+  else
+    print("MSG: No saved sample data for this PSET")
   end
 end
